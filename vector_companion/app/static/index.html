@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Vector</title>
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar">
+    <div class="robot-card" data-go="overview">
+      <div class="avatar"><span class="eye"></span><span class="eye"></span></div>
+      <div class="rc-text">
+        <div class="rc-name">Vector</div>
+        <div class="rc-sub"><span class="dot" id="sb-dot"></span><span id="sb-status">Connecting...</span></div>
+      </div>
+    </div>
+    <nav id="nav">
+      <div class="nav-group">
+        <a data-go="overview"><i class="ic" style="--c:#0a84ff">%home%</i>Overview</a>
+        <a data-go="drive"><i class="ic" style="--c:#30d158">%joy%</i>Drive &amp; Camera</a>
+        <a data-go="scan"><i class="ic" style="--c:#ff9f0a">%doc%</i>Scan &amp; Ask</a>
+        <a data-go="actions"><i class="ic" style="--c:#ff9f0a">%spark%</i>Actions</a>
+      </div>
+      <div class="nav-group">
+        <a data-go="personality"><i class="ic" style="--c:#ff375f">%heart%</i>Personality</a>
+        <a data-go="voice"><i class="ic" style="--c:#ff2d55">%wave%</i>Voice &amp; Sound</a>
+        <a data-go="eyes"><i class="ic" style="--c:#64d2ff">%eye%</i>Eyes</a>
+        <a data-go="people"><i class="ic" style="--c:#bf5af2">%person%</i>People</a>
+        <a data-go="photos"><i class="ic" style="--c:#ffd60a">%photo%</i>Photos</a>
+      </div>
+      <div class="nav-group">
+        <a data-go="brain"><i class="ic" style="--c:#5e5ce6">%brain%</i>Brain &amp; Memory</a>
+        <a data-go="notify"><i class="ic" style="--c:#ff453a">%bell%</i>Notifications</a>
+        <a data-go="general"><i class="ic" style="--c:#8e8e93">%gear%</i>Robot Settings</a>
+        <a data-go="about"><i class="ic" style="--c:#8e8e93">%info%</i>Diagnostics</a>
+      </div>
+    </nav>
+  </aside>
+
+  <main id="main">
+    <!-- OVERVIEW -->
+    <section id="overview" class="page">
+      <div class="hero">
+        <div class="hero-art">
+          <div class="ring"><svg viewBox="0 0 120 120"><circle cx="60" cy="60" r="52" class="ring-bg"/><circle cx="60" cy="60" r="52" class="ring-fg" id="ring-fg"/></svg>
+            <div class="ring-face"><span class="eye big"></span><span class="eye big"></span></div>
+          </div>
+        </div>
+        <h1>Vector</h1>
+        <div class="hero-sub" id="hero-sub">Looking for Vector...</div>
+        <div class="pills">
+          <div class="pill"><span class="pl">Battery</span><span id="pill-batt">--</span></div>
+          <div class="pill"><span class="pl">Power</span><span id="pill-power">--</span></div>
+          <div class="pill"><span class="pl">Network</span><span id="pill-ip">--</span></div>
+        </div>
+      </div>
+      <div class="group-title">Quick actions</div>
+      <div class="quick">
+        <button class="qa" data-intent="dance"><i>%music%</i>Dance</button>
+        <button class="qa" data-intent="explore"><i>%compass%</i>Explore</button>
+        <button class="qa" data-intent="come_here"><i>%arrowdown%</i>Come here</button>
+        <button class="qa" data-intent="go_to_charger"><i>%bolt%</i>Go home</button>
+        <button class="qa" id="qa-listen"><i>%mic%</i>Listen</button>
+      </div>
+      <div class="group">
+        <div class="row"><div class="rl">Say something</div>
+          <div class="rr grow"><input id="ov-say" class="field" placeholder="Type and press Return"></div></div>
+      </div>
+      <div class="group-title">Services</div>
+      <div class="group" id="svc">
+        <div class="row"><div class="rl">wire-pod server</div><div class="rr" id="svc-wp">--</div></div>
+        <div class="row"><div class="rl">Vector's brain</div><div class="rr" id="svc-brain">--</div></div>
+        <div class="row"><div class="rl">Local AI model (Ollama)</div><div class="rr" id="svc-ollama">--</div></div>
+        <div class="row"><div class="rl">Companion (camera, face, personality)</div><div class="rr" id="svc-comp">--</div></div>
+      </div>
+    </section>
+
+    <!-- DRIVE -->
+    <section id="drive" class="page">
+      <h2 class="ptitle">Drive &amp; Camera</h2>
+      <div class="drive">
+        <div class="cam">
+          <img id="cam" alt="">
+          <div class="cam-msg" id="cam-msg">Connecting to camera...</div>
+          <div class="cam-hud">
+            <span class="live"><span class="rec"></span>LIVE</span>
+            <span id="cam-batt"></span>
+          </div>
+          <div class="joy-wrap">
+            <div class="joy" id="joy"><div class="knob" id="knob"></div></div>
+          </div>
+          <div class="vctl">
+            <div class="vcol"><div class="vlabel">Head</div><input type="range" class="vslider" id="head" min="-22" max="45" step="1" value="10"><div class="vval" id="head-v">10&deg;</div></div>
+            <div class="vcol"><div class="vlabel">Lift</div><input type="range" class="vslider" id="lift" min="0" max="100" step="1" value="0"><div class="vval" id="lift-v">0%</div></div>
+          </div>
+        </div>
+        <div class="drive-side">
+          <div class="group">
+            <div class="row"><div class="rl">Speed</div>
+              <div class="rr"><div class="seg" id="speed"><button data-v="0.45">Slow</button><button data-v="0.75" class="on">Normal</button><button data-v="1">Fast</button></div></div></div>
+            <div class="row"><div class="rl">Show camera on his face</div><div class="rr"><label class="sw"><input type="checkbox" id="mirror"><span></span></label></div></div>
+          </div>
+          <div class="group">
+            <div class="row"><div class="rl">Say</div><div class="rr grow"><input id="dr-say" class="field" placeholder="Talk through Vector"></div></div>
+          </div>
+          <div class="btn-row">
+            <button class="btn" data-intent="take_photo">%camera% Take photo</button>
+            <button class="btn danger" id="stop-all">Stop</button>
+          </div>
+          <div class="keys">
+            <div><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> or arrows to drive</div>
+            <div><kbd>R</kbd>/<kbd>F</kbd> head &nbsp; <kbd>T</kbd>/<kbd>G</kbd> lift &nbsp; <kbd>Space</kbd> stop</div>
+          </div>
+          <p class="foot">Vector stops automatically if the app loses contact. Keep him away from table edges while driving.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ACTIONS -->
+    <section id="actions" class="page">
+      <h2 class="ptitle">Actions</h2>
+      <p class="lead">Built-in behaviors. Vector plays them in his own style.</p>
+      <div class="tiles" id="tiles"></div>
+    </section>
+
+    <!-- SCAN -->
+    <section id="scan" class="page">
+      <h2 class="ptitle">Scan &amp; Ask</h2>
+      <p class="lead">Hold a page about 20 to 30 cm in front of Vector's face. He takes a high-resolution photo and an AI reads it.</p>
+      <div class="scan-top">
+        <div class="cam small"><img id="scam" alt=""><div class="cam-msg" id="scam-msg">Connecting to camera...</div><div class="frame-guide"></div></div>
+        <div class="scan-ctl">
+          <div class="group">
+            <div class="row col"><div class="rl">What should he do?</div>
+              <div class="seg wide" id="scan-mode"><button data-v="explain" class="on">Explain</button><button data-v="solve">Solve</button><button data-v="read">Read</button><button data-v="describe">Identify</button></div></div>
+            <div class="row"><div class="rr grow"><input id="scan-q" class="field" style="text-align:left" placeholder="Optional question, e.g. why is my answer to 3 wrong?"></div></div>
+          </div>
+          <button class="btn primary big" id="scan-go">%camera% Scan now</button>
+          <p class="foot">Or say: "Hey Vector... I have a question... check my homework".</p>
+        </div>
+      </div>
+      <div class="result" id="scan-result" hidden>
+        <div class="res-head"><img id="res-img" alt=""><div><div class="res-title" id="res-title"></div><div class="res-meta" id="res-meta"></div><div class="res-say" id="res-say"></div></div>
+          <button class="btn small" id="res-copy">Copy</button></div>
+        <div class="md" id="res-body"></div>
+      </div>
+      <div class="group-title">Recent scans</div>
+      <div class="group" id="scan-hist"></div>
+    </section>
+
+    <!-- PERSONALITY -->
+    <section id="personality" class="page">
+      <h2 class="ptitle">Personality</h2>
+      <div class="group">
+        <div class="row"><div class="rl">Companion service<small id="comp-err"></small></div><div class="rr" id="comp-state">--</div></div>
+      </div>
+      <div class="group-title">Reactions</div>
+      <div class="group">
+        <div class="row"><div class="rl">Hearts when you pet him<small>Hold your finger on his back for a second</small></div><div class="rr"><label class="sw"><input type="checkbox" data-c="pet_hearts"><span></span></label></div></div>
+        <div class="row"><div class="rl">Greet people he recognizes</div><div class="rr"><label class="sw"><input type="checkbox" data-c="greetings"><span></span></label></div></div>
+        <div class="row"><div class="rl">Morning briefing<small>First time he sees you before 11 AM: time, your list, reminders</small></div><div class="rr"><label class="sw"><input type="checkbox" data-c="morning_briefing"><span></span></label></div></div>
+        <div class="row"><div class="rl">Show icons on his face for notifications</div><div class="rr"><label class="sw"><input type="checkbox" data-c="face_icons"><span></span></label></div></div>
+      </div>
+      <div class="group-title">Focus timer</div>
+      <div class="group">
+        <div class="row"><div class="rl">Length</div><div class="rr"><div class="stepper" data-c="focus_minutes" data-step="5" data-min="5" data-unit=" min"></div></div></div>
+        <div class="row"><div class="rl">Check in every 5 minutes on his face</div><div class="rr"><label class="sw"><input type="checkbox" data-c="focus_checkins"><span></span></label></div></div>
+        <div class="row"><div class="rl" id="focus-state">No timer running</div><div class="rr"><button class="btn primary small" id="focus-go">Start</button><button class="btn small" id="focus-stop">Stop</button></div></div>
+      </div>
+      <div class="group-title">Try it</div>
+      <div class="btn-row wrap">
+        <button class="btn" data-face="heart">Show a heart</button>
+        <button class="btn" data-face="check">Checkmark</button>
+        <button class="btn" id="brief-test">Morning briefing preview</button>
+      </div>
+      <div class="group"><div class="row"><div class="rl">Put words on his face</div><div class="rr grow"><input id="face-text" class="field" placeholder="Type and press Return"></div></div></div>
+      <div class="group-title">Animations <span class="hint" id="anim-count"></span></div>
+      <div class="group"><div class="row"><div class="rr grow"><input id="anim-q" class="field" style="text-align:left" placeholder="Search: happy, dance, sneeze, fist bump, sad..."></div></div></div>
+      <div class="anim-list" id="anim-list"></div>
+    </section>
+
+    <!-- VOICE -->
+    <section id="voice" class="page">
+      <h2 class="ptitle">Voice &amp; Sound</h2>
+      <div class="group">
+        <div class="row col"><div class="rl">Make Vector say</div>
+          <div class="say-box"><textarea id="vo-say" class="field area" rows="2" placeholder="Anything you type here, he says out loud"></textarea><button class="btn primary" id="vo-say-btn">Speak</button></div>
+          <div class="chips" id="chips"></div></div>
+      </div>
+      <div class="group">
+        <div class="row"><div class="rl">Volume</div>
+          <div class="rr grow"><span class="mini">%speakeroff%</span><input type="range" id="volume" min="0" max="5" step="1" class="slider"><span class="mini">%speaker%</span></div></div>
+        <div class="row"><div class="rl">Start listening</div><div class="rr"><button class="btn" id="vo-listen">Hey Vector</button></div></div>
+      </div>
+      <div class="group-title">Play a sound</div>
+      <div class="group">
+        <label class="drop" id="drop"><input type="file" id="sound" accept="audio/*" hidden>
+          <span>%wave%</span><b>Drop an audio file</b><small>or click to choose. MP3, WAV, M4A. It's converted for Vector's speaker.</small></label>
+      </div>
+    </section>
+
+    <!-- EYES -->
+    <section id="eyes" class="page">
+      <h2 class="ptitle">Eyes</h2>
+      <div class="eye-preview"><span class="eye xl" id="ep1"></span><span class="eye xl" id="ep2"></span></div>
+      <div class="group-title">Preset colors</div>
+      <div class="swatches" id="swatches"></div>
+      <div class="group-title">Custom color</div>
+      <div class="group">
+        <div class="row"><div class="rl">Use a custom color</div><div class="rr"><label class="sw"><input type="checkbox" id="custom-on"><span></span></label></div></div>
+        <div class="row"><div class="rl">Hue</div><div class="rr grow"><input type="range" id="hue" min="0" max="1" step="0.005" class="slider hue"></div></div>
+        <div class="row"><div class="rl">Saturation</div><div class="rr grow"><input type="range" id="sat" min="0" max="1" step="0.01" class="slider"></div></div>
+      </div>
+    </section>
+
+    <!-- PEOPLE -->
+    <section id="people" class="page">
+      <h2 class="ptitle">People</h2>
+      <p class="lead">Faces Vector recognizes. He greets people he knows by name.</p>
+      <div class="group" id="faces"></div>
+      <div class="group-title">Learn a new face</div>
+      <div class="group">
+        <div class="row"><div class="rl">Name</div><div class="rr grow"><input id="face-name" class="field" placeholder="Their name"></div><div class="rr"><button class="btn primary" id="face-add">Learn</button></div></div>
+      </div>
+      <p class="foot">Have the person look straight at Vector, about half a meter away, then press Learn. He'll take a few seconds.</p>
+    </section>
+
+    <!-- PHOTOS -->
+    <section id="photos" class="page">
+      <h2 class="ptitle">Photos <button class="btn small" id="ph-refresh">Refresh</button></h2>
+      <p class="lead">Pictures Vector has taken. Say "Hey Vector, take a photo" or use the Take photo button in Drive.</p>
+      <div class="photos" id="photo-grid"></div>
+    </section>
+
+    <!-- BRAIN -->
+    <section id="brain" class="page">
+      <h2 class="ptitle">Brain &amp; Memory</h2>
+      <div class="group-title">Personality</div>
+      <div class="group">
+        <div class="row"><div class="rl">Style<small id="style-help">Playful little robot</small></div>
+          <div class="rr"><div class="seg" id="style"><button data-v="vector">Vector</button><button data-v="jarvis">JARVIS</button><button data-v="friday">FRIDAY</button></div></div></div>
+      </div>
+      <div class="group-title">Who answers when you talk to him</div>
+      <div class="group">
+        <div class="row"><div class="rl">AI</div>
+          <div class="rr"><div class="seg" id="provider"><button data-v="ollama">On this Mac</button><button data-v="anthropic">Claude</button><button data-v="chatgpt">ChatGPT</button><button data-v="gemini">Gemini</button></div></div></div>
+        <div class="row" id="row-key"><div class="rl" id="key-label">API key<small id="key-help"></small></div><div class="rr grow"><input id="api-key" type="password" class="field" placeholder="Paste key"></div></div>
+        <div class="row"><div class="rl">Model</div><div class="rr"><select id="model" class="field sel"></select></div></div>
+        <div class="row"><div class="rl">Your name</div><div class="rr grow"><input id="owner" class="field"></div></div>
+        <div class="row"><div class="rl">Knows your recent GitHub commits</div><div class="rr"><label class="sw"><input type="checkbox" id="projects"><span></span></label></div></div>
+      </div>
+      <div class="group-title">About you <span class="hint">Vector and the homework scanner use this to pitch explanations at your level</span></div>
+      <div class="group"><div class="row col"><textarea id="about-me" class="field area" rows="5" placeholder="Classes, interests, how you like things explained"></textarea></div></div>
+      <p class="foot">Keys stay on this Mac in the project's .env file. The homework scanner uses whichever key you've saved (Claude first), or a local vision model.</p>
+      <div class="btn-row"><button class="btn primary" id="brain-save">Save and restart brain</button><span class="saved" id="brain-saved"></span></div>
+      <div class="group-title">Things he remembers <span class="hint">"I have a question... remember that ..."</span></div>
+      <div class="group" id="mem"></div>
+      <div class="group-title">To-do list <span class="hint">"I have a question... add ... to my list"</span></div>
+      <div class="group" id="todo"></div>
+      <div class="group"><div class="row"><div class="rr grow"><input id="todo-new" class="field" placeholder="Add a to-do and press Return"></div></div></div>
+    </section>
+
+    <!-- NOTIFICATIONS -->
+    <section id="notify" class="page">
+      <h2 class="ptitle">Notifications</h2>
+      <div class="group-title">Claude Code</div>
+      <div class="group">
+        <div class="row"><div class="rl">When Claude finishes<small>Quick replies stay silent</small></div><div class="rr"><label class="sw"><input type="checkbox" data-n="claude_done"><span></span></label></div></div>
+        <div class="row"><div class="rl">Only if it took at least</div><div class="rr"><div class="stepper" data-n="claude_min_seconds" data-step="10" data-min="0" data-unit="s"></div></div></div>
+        <div class="row"><div class="rl">When Claude needs your input</div><div class="rr"><label class="sw"><input type="checkbox" data-n="claude_input"><span></span></label></div></div>
+      </div>
+      <div class="group-title">Terminal</div>
+      <div class="group">
+        <div class="row"><div class="rl">When a long command finishes</div><div class="rr"><label class="sw"><input type="checkbox" data-n="terminal"><span></span></label></div></div>
+        <div class="row"><div class="rl">Long means at least</div><div class="rr"><div class="stepper" data-n="terminal_min_seconds" data-step="10" data-min="10" data-unit="s"></div></div></div>
+        <div class="row"><div class="rl">Only tell me about failures</div><div class="rr"><label class="sw"><input type="checkbox" data-n="terminal_failures_only"><span></span></label></div></div>
+      </div>
+      <div class="group-title">Style</div>
+      <div class="group">
+        <div class="row"><div class="rl">Flash his eyes<small>Green for done, orange for failed, yellow for input</small></div><div class="rr"><label class="sw"><input type="checkbox" data-n="eye_flash"><span></span></label></div></div>
+        <div class="row"><div class="rl">Quiet hours</div><div class="rr"><label class="sw"><input type="checkbox" id="qh-on"><span></span></label></div></div>
+        <div class="row"><div class="rl">From</div><div class="rr"><input type="time" id="qh-start" class="field time"> <span class="mute">to</span> <input type="time" id="qh-end" class="field time"></div></div>
+      </div>
+      <div class="btn-row"><button class="btn primary" id="test-notify">Send a test announcement</button><span class="saved" id="notify-saved"></span></div>
+      <div class="group-title">Recent activity</div>
+      <div class="group log" id="hooklog"></div>
+    </section>
+
+    <!-- GENERAL -->
+    <section id="general" class="page">
+      <h2 class="ptitle">Robot Settings</h2>
+      <div class="group">
+        <div class="row"><div class="rl">Back button wake word</div><div class="rr"><div class="seg" id="wake"><button data-v="0">Hey Vector</button><button data-v="1">Alexa</button></div></div></div>
+        <div class="row"><div class="rl">Temperature</div><div class="rr"><div class="seg" id="temp"><button data-v="f">&deg;F</button><button data-v="c">&deg;C</button></div></div></div>
+        <div class="row"><div class="rl">Clock</div><div class="rr"><div class="seg" id="clock"><button data-v="12">12-hour</button><button data-v="24">24-hour</button></div></div></div>
+      </div>
+      <div class="group">
+        <div class="row"><div class="rl">Location<small>Used for weather</small></div><div class="rr grow"><input id="location" class="field" placeholder="Bellevue, Washington, United States"></div></div>
+        <div class="row"><div class="rl">Time zone</div><div class="rr"><select id="tz" class="field sel"></select></div></div>
+        <div class="row"><div class="rl">Language</div><div class="rr"><select id="locale" class="field sel">
+          <option value="en-US">English (US)</option><option value="en-GB">English (UK)</option><option value="en-AU">English (Australia)</option>
+          <option value="de-DE">German</option><option value="fr-FR">French</option><option value="ja-JP">Japanese</option></select></div></div>
+      </div>
+      <p class="foot">Weather also needs a free key in wire-pod: open localhost:8080, Server Settings, Weather.</p>
+    </section>
+
+    <!-- ABOUT -->
+    <section id="about" class="page">
+      <h2 class="ptitle">Diagnostics</h2>
+      <div class="group" id="about-rows"></div>
+      <div class="group-title">Lifetime</div>
+      <div class="group" id="stats"></div>
+      <div class="group-title">Brain log</div>
+      <div class="group log" id="brainlog"></div>
+      <div class="btn-row"><button class="btn" id="brain-restart">Restart brain</button><button class="btn" id="release">Give Vector control back</button></div>
+    </section>
+  </main>
+</div>
+<div class="toast" id="toast"></div>
+<div class="lightbox" id="lightbox"><img id="lb-img" alt=""><div class="lb-bar"><button class="btn danger" id="lb-del">Delete</button><button class="btn" id="lb-close">Close</button></div></div>
+<script src="/static/app.js"></script>
+</body>
+</html>

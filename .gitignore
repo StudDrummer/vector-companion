@@ -1,0 +1,12 @@
+# secrets and machine-specific files
+.env
+.venv/
+logs/
+_to_delete/
+*.egg-info/
+__pycache__/
+*.pyc
+setup.log
+*.jpg
+!vector_companion/app/static/*.png
+.DS_Store

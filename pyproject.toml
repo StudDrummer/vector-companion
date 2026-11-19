@@ -20,7 +20,7 @@ vector-mcp = "vector_companion.mcp_server:main"
 vector-app = "vector_companion.app.__main__:main"
 
 [tool.setuptools]
-packages = ["vector_companion", "vector_companion.app"]
+packages = ["vector_companion", "vector_companion.app", "vector_companion.app.static"]
 
 [tool.setuptools.package-data]
-"vector_companion.app" = ["static/*"]
+"vector_companion.app.static" = ["*"]

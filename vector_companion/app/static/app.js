@@ -648,7 +648,9 @@ async function refreshEars() {
   const st = !running ? '<span class="bad">Not running</span>' : e.state === "error" ? `<span class="bad">Microphone problem</span>`
     : /listening for '/.test(e.state || "") ? `<span class="ok">${esc(e.state.replace("listening for", "Listening for"))}</span>` : esc(e.state || "--");
   $("#ears-state").innerHTML = st;
-  $("#ears-sub").textContent = e.error ? e.error : running ? `Heard the wake word ${e.heard || 0} time${e.heard === 1 ? "" : "s"} since it started` : "Click Restart Ears, then allow the microphone";
+  const meter = e.peak !== undefined ? ` · mic ${e.mic_silent ? "SILENT" : Math.round(e.peak)} · best match ${Math.round((e.best_score || 0) * 100)}%` : "";
+  $("#ears-sub").textContent = e.error ? e.error : running ? `Heard the wake word ${e.heard || 0} time${e.heard === 1 ? "" : "s"}${meter}` : "Click Restart Ears, then allow the microphone";
+  if (e.mic_silent && running) $("#ears-state").innerHTML = '<span class="bad">Microphone blocked</span>';
   $("#ears-text").textContent = e.last_text ? `"${e.last_text}"` : "--";
   $("#ears-reply").textContent = e.last_reply ? "Reply: " + e.last_reply.slice(0, 140) : "";
 }

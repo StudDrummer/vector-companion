@@ -217,7 +217,18 @@ class Ears:
     def _loop(self, np):
         levels: list[float] = []
         loaded = self.wake_word()
+        peak_score, peak_level, last_report, silent_since = 0.0, 0.0, time.time(), time.time()
         while True:
+            if time.time() - last_report > 1.0:  # live meter for the app + silent-mic detection
+                lvl = float(np.median(levels)) if levels else 0.0
+                if peak_level > 3:
+                    silent_since = time.time()
+                silent = time.time() - silent_since > 8
+                self.set(level=round(lvl, 1), peak=round(peak_level, 1), best_score=round(peak_score, 3),
+                         mic_silent=silent,
+                         error=("The microphone is sending silence. Open System Settings > Privacy & Security > "
+                                "Microphone and turn on Vector Ears (or Terminal), then click Restart Ears.") if silent else "")
+                peak_score, peak_level, last_report = 0.0, 0.0, time.time()
             p = self.prefs()["ears"]
             if p.get("wake_word", "hey_jarvis") != loaded and p.get("wake_word") in WAKE_WORDS:
                 loaded = p["wake_word"]
@@ -235,10 +246,15 @@ class Ears:
             if time.time() < self.vector_busy_until:
                 self.wake.reset()
                 continue
-            levels = (levels + [self.rms(f)])[-60:]
+            r = self.rms(f)
+            levels = (levels + [r])[-60:]
             self.noise = float(np.median(levels))
+            peak_level = max(peak_level, r)
             scores = self.wake.predict(f)
             score = max(scores.values(), default=0.0)
+            peak_score = max(peak_score, float(score))
+            if score > 0.2:
+                log(f"wake score {score:.2f} (needs {0.85 - 0.6 * float(p.get('sensitivity', 0.5)):.2f})")
             sens = float(p.get("sensitivity", 0.5))
             if score < 0.85 - 0.6 * sens:
                 continue

@@ -73,16 +73,53 @@ cat > "$EARS/Contents/Info.plist" <<EOF
   <key>NSMicrophoneUsageDescription</key><string>Vector listens for "Hey Jarvis" so you can talk to your robot. Audio stays on this Mac.</string>
 </dict></plist>
 EOF
-cat > "$EARS/Contents/MacOS/VectorEars" <<EOF
+# A tiny native launcher: macOS only grants the microphone to a real app binary (not a shell script).
+# It asks for the microphone (you get the "Allow" prompt), then runs the Python listener as its child,
+# which inherits the permission.
+cat > "$TMP/main.swift" <<EOF
+import AVFoundation
+import Foundation
+
+let root = "$ROOT"
+let py = "$PY"
+
+let check = Process()
+check.executableURL = URL(fileURLWithPath: "/usr/bin/pgrep")
+check.arguments = ["-f", "vector_companion.ears"]
+check.standardOutput = FileHandle.nullDevice
+try? check.run(); check.waitUntilExit()
+if check.terminationStatus == 0 { exit(0) }  // already running
+
+let asked = DispatchSemaphore(value: 0)
+AVCaptureDevice.requestAccess(for: .audio) { _ in asked.signal() }
+asked.wait()
+
+let logPath = root + "/logs/ears.out"
+if !FileManager.default.fileExists(atPath: logPath) { FileManager.default.createFile(atPath: logPath, contents: nil) }
+let log = FileHandle(forWritingAtPath: logPath)
+log?.seekToEndOfFile()
+
+let p = Process()
+p.executableURL = URL(fileURLWithPath: py)
+p.arguments = ["-m", "vector_companion.ears"]
+p.currentDirectoryURL = URL(fileURLWithPath: root)
+if let log = log { p.standardOutput = log; p.standardError = log }
+do { try p.run() } catch { exit(1) }
+p.waitUntilExit()
+exit(p.terminationStatus)
+EOF
+if xcrun swiftc -O -o "$EARS/Contents/MacOS/VectorEars" "$TMP/main.swift" >/dev/null 2>"$TMP/swift.err"; then
+  echo "   built the native microphone launcher"
+else
+  echo "   couldn't compile the launcher (install Xcode command line tools: xcode-select --install):"
+  sed 's/^/     /' "$TMP/swift.err" | head -5
+  cat > "$EARS/Contents/MacOS/VectorEars" <<EOF
 #!/bin/bash
 cd "$ROOT"
-pgrep -f "vector_companion.ears" >/dev/null && exit 0   # only one copy
-# script-based apps can be launched under Rosetta (Intel); the Python packages are Apple Silicon
-if [ "\$(sysctl -n hw.optional.arm64 2>/dev/null)" = "1" ]; then
-  exec /usr/bin/arch -arm64 "$PY" -m vector_companion.ears >> "$ROOT/logs/ears.out" 2>&1
-fi
+pgrep -f "vector_companion.ears" >/dev/null && exit 0
 exec "$PY" -m vector_companion.ears >> "$ROOT/logs/ears.out" 2>&1
 EOF
+fi
 chmod +x "$EARS/Contents/MacOS/VectorEars"
 codesign --force --deep --sign - "$EARS" >/dev/null 2>&1 || true
 rm -rf "$TMP"

@@ -24,6 +24,7 @@ import re
 import subprocess
 import threading
 import time
+import urllib.error
 import urllib.request
 import uuid
 from datetime import datetime
@@ -385,10 +386,75 @@ def stream_llm(messages: list[dict]):
     """Yield text chunks from the configured backend."""
     if BACKEND == "anthropic":
         yield from _stream_anthropic(messages)
+    elif BACKEND == "ollama":
+        yield from _stream_ollama(messages)
     else:
-        base = OLLAMA_URL if BACKEND == "ollama" else OPENAI_URL
-        key = "ollama" if BACKEND == "ollama" else OPENAI_KEY
-        yield from _stream_openai(base, key, messages)
+        yield from _stream_openai(OPENAI_URL, OPENAI_KEY, messages)
+
+
+def _ollama_base() -> str:
+    b = OLLAMA_URL.rstrip("/")
+    return b[:-3] if b.endswith("/v1") else b
+
+
+KEEP_ALIVE = os.environ.get("OLLAMA_KEEP_ALIVE", "2h")  # keep the model in memory between questions
+
+
+def _stream_ollama(messages, think: bool = False, max_tokens: int = 350):
+    """Ollama's native chat API: lets us switch 'thinking' off (fast, and the whole budget goes to the answer)."""
+    body = {"model": _model(), "messages": messages, "stream": True, "keep_alive": KEEP_ALIVE,
+            "think": think, "options": {"num_predict": max_tokens, "temperature": 0.7}}
+    url = _ollama_base() + "/api/chat"
+    for attempt in (1, 2):
+        req = urllib.request.Request(url, data=json.dumps(body).encode(), headers={"Content-Type": "application/json"})
+        try:
+            with urllib.request.urlopen(req, timeout=120) as resp:
+                in_think = False
+                for raw in resp:
+                    try:
+                        ev = json.loads(raw)
+                    except ValueError:
+                        continue
+                    text = (ev.get("message") or {}).get("content") or ""
+                    out = ""
+                    while text:  # drop any inline <think>...</think>, even across chunks
+                        if in_think:
+                            end = text.find("</think>")
+                            if end == -1:
+                                text = ""
+                            else:
+                                in_think, text = False, text[end + len("</think>"):]
+                        else:
+                            start = text.find("<think>")
+                            if start == -1:
+                                out, text = out + text, ""
+                            else:
+                                out, in_think, text = out + text[:start], True, text[start + len("<think>"):]
+                    if out:
+                        yield out
+                    if ev.get("done"):
+                        return
+            return
+        except urllib.error.HTTPError as e:
+            if attempt == 1 and e.code == 400:  # model doesn't accept the think flag: retry without it
+                body.pop("think", None)
+                continue
+            raise
+
+
+def warm_up():
+    """Load the local model into memory at startup so the first question isn't slow."""
+    if BACKEND != "ollama":
+        return
+    try:
+        req = urllib.request.Request(_ollama_base() + "/api/chat", data=json.dumps(
+            {"model": _model(), "messages": [{"role": "user", "content": "hi"}], "stream": False,
+             "keep_alive": KEEP_ALIVE, "think": False, "options": {"num_predict": 1}}).encode(),
+            headers={"Content-Type": "application/json"})
+        urllib.request.urlopen(req, timeout=180).read()
+        print(f"[brain] {_model()} loaded and warm")
+    except Exception as e:  # noqa: BLE001
+        print(f"[brain] warm-up failed: {e}")
 
 
 def _sse_lines(resp):
@@ -538,14 +604,21 @@ class Handler(BaseHTTPRequestHandler):
 
     @staticmethod
     def _safe_stream(messages):
+        got = False
         try:
-            yield from stream_llm(messages)
+            for c in stream_llm(messages):
+                if c.strip():
+                    got = True
+                yield c
+            if not got:  # never hand wire-pod an empty answer
+                yield "Hmm, I lost my train of thought. Could you ask me that again?"
         except Exception as e:  # noqa: BLE001
             print(f"[brain] backend error: {e}")
             yield "Hmm, my brain server is not answering right now. Check that the model is running."
 
 
 def main():
+    threading.Thread(target=warm_up, daemon=True).start()
     print(f"[brain] Vector brain on http://{HOST}:{PORT}/v1  backend={BACKEND} model={_model()}")
     print(f"[brain] data dir: {DATA_DIR}")
     ThreadingHTTPServer((HOST, PORT), Handler).serve_forever()

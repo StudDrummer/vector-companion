@@ -177,6 +177,9 @@ class Companion:
 
     def find_trigger(self, *keywords: str) -> str | None:
         for k in keywords:
+            if k in self.triggers:
+                return k
+        for k in keywords:
             for t in self.triggers:
                 if k.lower() in t.lower():
                     return t
@@ -228,6 +231,13 @@ class Companion:
                     r.behavior.say_text("Hold it up in front of me. Three, two, one.")
                 self.show(face_art.camera(), 0.8, with_control=r)
             jpeg = self.capture()
+            try:
+                with self.control() as r:
+                    t = self.find_trigger("KnowledgeGraphSearchingGetIn")
+                    if t:
+                        r.anim.play_animation_trigger(t)
+            except Exception:  # noqa: BLE001
+                pass
             done = threading.Event()
 
             def thinking():  # animated dots while the AI works
@@ -248,7 +258,10 @@ class Companion:
             mac_notify("Vector scanned it", res["say"])
             try:
                 with self.control() as r:
-                    self.show(face_art.check(), 1.5, with_control=r)
+                    t = self.find_trigger("KnowledgeGraphSearchingGetOutSuccess")
+                    if t:
+                        r.anim.play_animation_trigger(t)
+                    self.show(face_art.check(), 1.2, with_control=r)
                     r.behavior.say_text(res["say"])
             except Exception:  # noqa: BLE001
                 pass
@@ -256,6 +269,12 @@ class Companion:
             return res
         except Exception as e:  # noqa: BLE001
             log(f"scan failed: {e}")
+            try:
+                t = self.find_trigger("KnowledgeGraphSearchingFail")
+                if t:
+                    self.anim(t)
+            except Exception:  # noqa: BLE001
+                pass
             try:
                 self.say("Sorry, I couldn't scan that. " + (str(e)[:120] if "vision AI" in str(e) else ""))
             except Exception:  # noqa: BLE001
@@ -302,9 +321,10 @@ class Companion:
         self.focus = None
         try:
             with self.control() as r:
-                trig = self.find_trigger("Celebrat", "Happy", "Success", "FistBump")
-                if trig:
-                    r.anim.play_animation_trigger(trig)
+                for name in ("TimerRing", "BlackJack_VictorWin"):  # his own timer ring, then a victory dance
+                    trig = self.find_trigger(name)
+                    if trig:
+                        r.anim.play_animation_trigger(trig)
                 self.show(face_art.check(), 2, with_control=r)
                 r.behavior.say_text(f"Time's up {OWNER}! {total} minute{'s' if total != 1 else ''} done. Take a five minute break.")
         except Exception as e:  # noqa: BLE001
@@ -338,7 +358,7 @@ class Companion:
             with self.control() as r:
                 for s in (0.8, 1.0, 1.1, 1.0):  # little heartbeat
                     self.show(face_art.heart(s), 0.35, with_control=r)
-                trig = self.find_trigger("PettingBliss", "Petting", "Happy", "Love")
+                trig = self.find_trigger("PettingLevel4", "PettingLevel3", "Feedback_GoodRobot")
                 if trig:
                     r.anim.play_animation_trigger(trig)
             log("pet: hearts")
@@ -379,7 +399,7 @@ class Companion:
         try:
             text = self.greeting_text(name)
             with self.control() as r:
-                trig = self.find_trigger("GreetAfterLongTime", "Greet", "Happy")
+                trig = self.find_trigger("GreetAfterLongTime", "OnboardingReactToFaceHappy", "ReactToGreeting")
                 if trig and len(text) < 40:
                     r.anim.play_animation_trigger(trig)
                 r.behavior.say_text(text)

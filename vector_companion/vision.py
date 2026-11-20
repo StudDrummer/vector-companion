@@ -6,6 +6,7 @@ import json
 import os
 import re
 import time
+import urllib.error
 import urllib.request
 from datetime import datetime
 from pathlib import Path
@@ -135,9 +136,17 @@ def ask(jpeg: bytes, mode: str = "explain", question: str = "") -> dict:
     else:
         base = os.environ.get("OLLAMA_URL", "http://127.0.0.1:11434/v1").rstrip("/")
         base = base[:-3] if base.endswith("/v1") else base
-        r = _post(base + "/api/chat", {"model": model, "stream": False,
-                                       "messages": [{"role": "user", "content": prompt, "images": [b64]}]}, {}, 300)
-        out = r["message"]["content"]
+        body = {"model": model, "stream": False, "keep_alive": "2h", "think": mode == "solve",
+                "options": {"num_predict": 3000 if mode == "solve" else 1500},
+                "messages": [{"role": "user", "content": prompt, "images": [b64]}]}
+        try:
+            r = _post(base + "/api/chat", body, {}, 300)
+        except urllib.error.HTTPError as e:
+            if e.code != 400:
+                raise
+            body.pop("think")  # model without a thinking switch
+            r = _post(base + "/api/chat", body, {}, 300)
+        out = re.sub(r"<think>.*?</think>", "", r["message"]["content"], flags=re.S).strip()
     say, body = split_say(out)
     return {"mode": mode, "title": title, "say": say, "text": body, "backend": backend, "model": model,
             "seconds": round(time.time() - t0, 1)}

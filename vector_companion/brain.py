@@ -31,7 +31,7 @@ from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from . import config
+from . import config, settings as S
 
 config.load_env()
 
@@ -184,6 +184,13 @@ def local_skill(utterance: str) -> str | None:
         if re.search(r"forget everything", t):
             _save(MEMORY_FILE, [])
             return "Okay. My memory is wiped clean."
+        if re.search(r"\bweather\b|temperature outside|\bumbrella\b|need a jacket|is it (going to )?(rain|snow|cold)", t):
+            try:
+                from . import weather
+                return weather.sentence("tomorrow" if "tomorrow" in t else "today")
+            except Exception as e:  # noqa: BLE001
+                print(f"[brain] weather failed: {e}")
+                return "I couldn't reach the weather service just now."
         m = re.search(r"\badd (.+?) to (?:my )?(?:to do |todo |to-do )?list$", t)
         if m:
             todo = _load(TODO_FILE, [])
@@ -216,6 +223,22 @@ def local_skill(utterance: str) -> str | None:
             return msg + " Sleep well."
         if re.fullmatch(r"(good )?morning.*", t) or "briefing" in t:
             return briefing()
+        if re.search(r"(guard|watch) (my |the )?desk|guard mode|i'?m (leaving|heading out|going out)|keep watch", t) \
+                and not re.search(r"\b(stop|end|off|cancel)\b", t):
+            from .companion_client import call
+            try:
+                call("/guard", {"on": True}, timeout=30)
+                return ""  # he announces it himself
+            except Exception:  # noqa: BLE001
+                return "I can't reach my camera helper right now, so I can't guard the desk."
+        if re.search(r"(stop|end|cancel|turn off) (the )?(desk )?guard|guard (mode )?off|i'?m back", t):
+            from .companion_client import call
+            try:
+                n = len(call("/guard", {"on": False}, timeout=10).get("events") or [])
+                return "Guard off. " + ("Nothing happened while you were gone." if n == 0 else
+                                        f"I saw movement {n} time{'s' if n != 1 else ''}. The photos are in the app.")
+            except Exception:  # noqa: BLE001
+                return "Guard off."
         scan_mode = _scan_mode(t)
         if scan_mode:
             from .companion_client import call
@@ -320,6 +343,12 @@ def briefing() -> str:
     part = "morning" if now.hour < 12 else "afternoon" if now.hour < 17 else "evening"
     who = "sir" if _style() == "jarvis" else OWNER
     out = [f"Good {part}, {who}. It's {now:%-I:%M} on {now:%A}."]
+    if S.load()["weather"].get("enabled", True):
+        try:
+            from . import weather
+            out.append(weather.sentence())
+        except Exception as e:  # noqa: BLE001
+            print(f"[brain] weather skipped: {e}")
     todo = _load(TODO_FILE, [])
     if todo:
         out.append(f"You have {len(todo)} thing{'s' if len(todo) != 1 else ''} on your list, starting with {todo[0]}.")
@@ -378,7 +407,36 @@ def _scan_mode(t: str) -> str | None:
 
 # ------------------------------------------------------------------ LLM backends
 def _model() -> str:
-    return MODEL or DEFAULT_MODELS.get(BACKEND, "llama3.2:3b")
+    m = MODEL or DEFAULT_MODELS.get(BACKEND, "llama3.2:3b")
+    return chat_model(m) if BACKEND == "ollama" else m
+
+
+# Models that "think" before answering. Fine for homework photos, far too slow (and often empty) for talking.
+THINKERS = re.compile(r"qwen3|deepseek-r1|qwq|gpt-oss|magistral|phi4-reasoning|cogito", re.I)
+FAST_TALKERS = ("llama3.2:3b", "llama3.2", "gemma3:4b", "llama3.1:8b", "qwen2.5:7b", "qwen2.5:3b", "mistral", "gemma3")
+_chat_cache: dict = {}
+
+
+def installed_ollama() -> list[str]:
+    try:
+        with urllib.request.urlopen(_ollama_base() + "/api/tags", timeout=3) as r:
+            return [m["name"] for m in json.loads(r.read()).get("models", [])]
+    except Exception:  # noqa: BLE001
+        return []
+
+
+def chat_model(preferred: str) -> str:
+    """Use the chosen model for talking unless it's a thinking model; then pick a fast one that's installed."""
+    if not THINKERS.search(preferred or ""):
+        return preferred
+    if preferred in _chat_cache and time.time() - _chat_cache[preferred][1] < 300:
+        return _chat_cache[preferred][0]
+    names = installed_ollama()
+    pick = next((n for want in FAST_TALKERS for n in names if n == want or n.startswith(want + ":")
+                 or (":" not in want and n.split(":")[0] == want)), None)
+    pick = pick or next((n for n in names if not THINKERS.search(n) and "uncensored" not in n), preferred)
+    _chat_cache[preferred] = (pick, time.time())
+    return pick
 
 
 def stream_llm(messages: list[dict]):
@@ -386,7 +444,15 @@ def stream_llm(messages: list[dict]):
     if BACKEND == "anthropic":
         yield from _stream_anthropic(messages)
     elif BACKEND == "ollama":
-        yield from _stream_ollama(messages)
+        got = False
+        for c in _stream_ollama(messages):
+            got = got or bool(c.strip())
+            yield c
+        if not got:  # the model spent its whole budget "thinking": answer with a fast model instead
+            alt = next((n for n in installed_ollama() if not THINKERS.search(n) and "uncensored" not in n), None)
+            if alt and alt != _model():
+                print(f"[brain] {_model()} gave no answer; retrying with {alt}")
+                yield from _stream_ollama(messages, model=alt)
     else:
         yield from _stream_openai(OPENAI_URL, OPENAI_KEY, messages)
 
@@ -399,9 +465,9 @@ def _ollama_base() -> str:
 KEEP_ALIVE = os.environ.get("OLLAMA_KEEP_ALIVE", "2h")  # keep the model in memory between questions
 
 
-def _stream_ollama(messages, think: bool = False, max_tokens: int = 350):
+def _stream_ollama(messages, think: bool = False, max_tokens: int = 350, model: str | None = None):
     """Ollama's native chat API: lets us switch 'thinking' off (fast, and the whole budget goes to the answer)."""
-    body = {"model": _model(), "messages": messages, "stream": True, "keep_alive": KEEP_ALIVE,
+    body = {"model": model or _model(), "messages": messages, "stream": True, "keep_alive": KEEP_ALIVE,
             "think": think, "options": {"num_predict": max_tokens, "temperature": 0.7}}
     url = _ollama_base() + "/api/chat"
     for attempt in (1, 2):
@@ -536,8 +602,10 @@ def build_messages(incoming: list[dict]) -> tuple[list[dict], str]:
 class Handler(BaseHTTPRequestHandler):
     server_version = "VectorBrain/1.0"
 
-    def log_message(self, fmt, *args):  # quieter logs
-        print("[brain]", fmt % args)
+    def log_message(self, fmt, *args):  # quieter logs (skip the constant health checks)
+        msg = fmt % args
+        if "/health" not in msg:
+            print("[brain]", msg)
 
     def _json(self, code: int, obj) -> None:
         data = json.dumps(obj).encode()
@@ -551,7 +619,7 @@ class Handler(BaseHTTPRequestHandler):
         if self.path.rstrip("/").endswith("/models"):
             self._json(200, {"object": "list", "data": [{"id": "vector-brain", "object": "model"}]})
         elif self.path in ("/", "/health"):
-            self._json(200, {"ok": True, "backend": BACKEND, "model": _model()})
+            self._json(200, {"ok": True, "backend": BACKEND, "model": _model(), "chosen": MODEL or None})
         else:
             self._json(404, {"error": "not found"})
 

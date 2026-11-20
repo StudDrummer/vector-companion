@@ -19,8 +19,11 @@ import io
 import json
 import math
 import os
+import shutil
 import subprocess
+import tempfile
 import threading
+import wave
 import time
 import traceback
 import urllib.parse
@@ -106,6 +109,12 @@ class Companion:
         self.safety_event = None
         self.returning = False
         self._wake = threading.Event()
+        self.speaking_until = 0.0
+        self.audio_broken_until = 0.0
+        self.stats = {"since": time.time(), "drops": [], "wake_words": [], "intents": [], "taps": 0}
+        self.guard = None  # {"since": ts, "events": [...]} while desk guard is on
+        self.cube_connected = False
+        self._taps: list[float] = []
         for fn in (self._connect_loop, self._pet_loop, self._watch_loop, self._drive_loop):
             threading.Thread(target=fn, daemon=True).start()
 
@@ -135,6 +144,8 @@ class Companion:
     def mark_dead(self, why: str):
         if self._robot is not None:
             log(f"link lost: {why}")
+            self.stats["drops"] = [t for t in self.stats["drops"] if time.time() - t < 86400] + [time.time()]
+        self.cube_connected = False
         self.error = why
         r, self._robot = self._robot, None
         if r is not None:
@@ -155,6 +166,7 @@ class Companion:
                     self._connect()
                     self.error = None
                     log(f"connected to {self.serial}")
+                    threading.Thread(target=self._connect_cube, daemon=True).start()
                 except Exception as e:  # noqa: BLE001
                     self.error = f"{e.__class__.__name__}: {e}"[:200]
                     self._wake.wait(5)
@@ -190,6 +202,10 @@ class Companion:
         except Exception:  # noqa: BLE001
             self.triggers = self.triggers or []
         r.events.subscribe(self._on_face, Events.robot_observed_face)
+        for ev, fn in (("wake_word", self._on_wake_word), ("user_intent", self._on_intent),
+                       ("object_tapped", self._on_cube_tap)):
+            if hasattr(Events, ev):
+                r.events.subscribe(fn, getattr(Events, ev))
         self._robot = r
 
     # ------------------------------------------------------------ control
@@ -245,13 +261,57 @@ class Companion:
 
     def say(self, text: str):
         with self.control() as r:
+            self.speak(r, text)
+
+    # ------------------------------------------------------------ voice
+    def voice_engine(self) -> str:
+        """'mac' (a Mac voice through his speaker, e.g. British JARVIS) or 'robot' (his own voice)."""
+        v = S.load()["voice"]
+        eng = v.get("engine", "auto")
+        if eng == "auto":
+            eng = "mac" if S.load().get("persona", {}).get("style") == "jarvis" else "robot"
+        if eng == "mac" and (not shutil.which("say") or time.time() < self.audio_broken_until):
+            eng = "robot"
+        return eng
+
+    def _mac_wav(self, text: str) -> tuple[str, float]:
+        v = S.load()["voice"]
+        path = os.path.join(tempfile.gettempdir(), f"vector-say-{threading.get_ident()}.wav")
+        subprocess.run(["say", "-v", str(v.get("mac_voice") or "Daniel"), "-r", str(int(v.get("rate") or 190)),
+                        "-o", path, "--file-format=WAVE", "--data-format=LEI16@16000", text],
+                       capture_output=True, timeout=30, check=True)
+        with wave.open(path, "rb") as w:
+            return path, w.getnframes() / float(w.getframerate())
+
+    def speak(self, r, text: str):
+        """Say something in the chosen voice. Needs behavior control (pass the robot from `with control()`)."""
+        text = (text or "").strip()
+        if not text:
+            return
+        self.speaking_until = time.time() + 2 + len(text) / 12
+        try:
+            if self.voice_engine() == "mac":
+                try:
+                    path, secs = self._mac_wav(text)
+                    self.speaking_until = time.time() + secs + 1
+                    vol = max(0, min(100, int(S.load()["voice"].get("volume") or 80)))
+                    raw = self.raw
+                    self.call(lambda: raw.audio.stream_wav_file(path, vol), secs + 15, "stream_wav_file")
+                    return
+                except VectorOffline:
+                    raise
+                except Exception as e:  # noqa: BLE001
+                    self.audio_broken_until = time.time() + 600
+                    log(f"Mac voice playback failed, using his own voice for 10 min: {e!r}"[:300])
             r.behavior.say_text(text)
+        finally:
+            self.speaking_until = time.time() + 0.6
 
     def announce(self, text: str, icon: str = "check"):
         img = face_art.ICONS.get(icon, face_art.check)()
         with self.control() as r:
             self.show(img, 1.4, with_control=r)
-            r.behavior.say_text(text)
+            self.speak(r, text)
             self.show(img, 2.0, with_control=r)
 
     def find_trigger(self, *keywords: str) -> str | None:
@@ -478,7 +538,7 @@ class Companion:
                 from anki_vector.util import degrees
                 r.behavior.set_head_angle(degrees(10))
                 if countdown:
-                    r.behavior.say_text("Hold it up in front of me. Three, two, one.")
+                    self.speak(r, "Hold it up in front of me. Three, two, one.")
                 self.show(face_art.camera(), 0.8, with_control=r)
             jpeg = self.capture()
             try:
@@ -498,7 +558,7 @@ class Companion:
                     if t:
                         r.anim.play_animation_trigger(t)
                     self.show(face_art.check(), 1.2, with_control=r)
-                    r.behavior.say_text(res["say"])
+                    self.speak(r, res["say"])
             except Exception:  # noqa: BLE001
                 pass
             log(f"scan {mode}: {res['say']}")
@@ -533,7 +593,7 @@ class Companion:
         try:
             with self.control() as r:
                 self.show(face_art.timer(total, total), 3, with_control=r)
-                r.behavior.say_text(f"{total} minute focus timer. Go get it.")
+                self.speak(r, f"{total} minute focus timer. Go get it.")
         except Exception as e:  # noqa: BLE001
             log(f"focus start display failed: {e}")
         shown = total
@@ -542,6 +602,11 @@ class Companion:
             if left <= 0:
                 break
             mins = int((left + 59) // 60)
+            frac = left / (total * 60)
+            color = "green" if frac > 0.5 else "yellow" if frac > 0.2 else "red"
+            if self.cube_connected and color != getattr(self, "_cube_shown", None):
+                self._cube_shown = color
+                self.cube_color(color)
             if prefs()["focus_checkins"] and mins % 5 == 0 and mins != shown:
                 shown = mins
                 try:
@@ -549,9 +614,12 @@ class Companion:
                 except Exception:  # noqa: BLE001
                     pass
             time.sleep(1)
+        self._cube_shown = None
         if not (self.focus and self.focus["id"] == fid):
             return
         self.focus = None
+        if self.cube_connected:
+            threading.Thread(target=self._cube_celebrate, daemon=True).start()
         for attempt in range(3):  # Wi-Fi blips shouldn't eat the end of a timer
             try:
                 with self.control() as r:
@@ -560,13 +628,20 @@ class Companion:
                         if trig:
                             r.anim.play_animation_trigger(trig)
                     self.show(face_art.check(), 2, with_control=r)
-                    r.behavior.say_text(f"Time's up {OWNER}! {total} minute{'s' if total != 1 else ''} done. "
-                                        "Take a five minute break.")
+                    self.speak(r, f"Time's up {OWNER}! {total} minute{'s' if total != 1 else ''} done. "
+                                  "Take a five minute break.")
                 break
             except Exception as e:  # noqa: BLE001
                 log(f"focus end attempt {attempt + 1} failed: {e}")
                 time.sleep(6)
         mac_notify("Focus timer done", f"{total} minutes. Take a break.")
+
+    def _cube_celebrate(self):
+        for _ in range(4):
+            self.cube_color("white")
+            time.sleep(0.4)
+            self.cube_color(None)
+            time.sleep(0.3)
 
     # ------------------------------------------------------------ petting
     def _pet_loop(self):
@@ -602,11 +677,187 @@ class Companion:
         except Exception as e:  # noqa: BLE001
             log(f"pet reaction skipped: {e}")
 
+    # ------------------------------------------------------------ hearing + network stats
+    def _on_wake_word(self, robot, event_type, event, *a):
+        try:
+            if getattr(event, "WhichOneof", None) and event.WhichOneof("wake_word_type") == "wake_word_end":
+                return
+        except Exception:  # noqa: BLE001
+            pass
+        self.stats["wake_words"] = [t for t in self.stats["wake_words"] if time.time() - t < 86400] + [time.time()]
+
+    def _on_intent(self, robot, event_type, event, *a):
+        name = str(getattr(event, "intent_id", "") or getattr(event, "intent", "") or "")
+        self.stats["intents"] = (self.stats["intents"] + [(time.time(), name)])[-50:]
+
+    def stats_summary(self) -> dict:
+        now = time.time()
+        drops = [t for t in self.stats["drops"] if now - t < 86400]
+        wakes = [t for t in self.stats["wake_words"] if now - t < 86400]
+        hour = [t for t in drops if now - t < 3600]
+        verdict = ("Connection looks steady." if not hour else
+                   f"He dropped off Wi-Fi {len(hour)} time{'s' if len(hour) != 1 else ''} in the last hour. "
+                   "Move his charger closer to the router, or run WirePod on a wired computer.")
+        return {"connected": self.connected, "drops_24h": len(drops), "drops_1h": len(hour),
+                "last_drops": [datetime.fromtimestamp(t).strftime("%-I:%M %p") for t in drops[-6:]],
+                "wake_words_24h": len(wakes),
+                "last_wake": datetime.fromtimestamp(wakes[-1]).strftime("%-I:%M:%S %p") if wakes else None,
+                "cube": self.cube_connected, "cube_taps": self.stats["taps"],
+                "voice": self.voice_engine(), "verdict": verdict,
+                "uptime_min": int((now - self.stats["since"]) / 60)}
+
+    # ------------------------------------------------------------ cube as a desk button
+    def _connect_cube(self):
+        if not prefs().get("cube_button", True) or self.cube_connected:
+            return
+        time.sleep(3)
+        try:
+            raw = self.raw
+            with self.control(wait=6):
+                self.call(lambda: raw.world.connect_cube(), 25, "connect_cube")
+            cube = raw.world.connected_light_cube
+            self.cube_connected = bool(cube and cube.is_connected)
+            if self.cube_connected:
+                log("cube connected: tap = focus timer, double tap = status report")
+                self.cube_color("blue", 2)
+        except Exception as e:  # noqa: BLE001
+            log(f"cube not connected ({e.__class__.__name__}); new battery needed?")
+
+    def cube_color(self, color: str | None, seconds: float = 0):
+        """Light the cube: green/yellow/red/blue/white, or None for off."""
+        try:
+            from anki_vector import lights
+            cube = self.raw.world.connected_light_cube if self.raw else None
+            if not cube or not cube.is_connected:
+                return
+            if color is None:
+                self.call(lambda: cube.set_lights_off(), 4, "cube_off")
+            else:
+                light = getattr(lights, f"{color}_light", lights.white_light)
+                self.call(lambda: cube.set_lights(light), 4, "cube_lights")
+                if seconds:
+                    threading.Timer(seconds, lambda: self.cube_color(None) if not self.focus else None).start()
+        except Exception:  # noqa: BLE001
+            pass
+
+    def _on_cube_tap(self, robot, event_type, event, *a):
+        now = time.time()
+        if self._taps and now - self._taps[-1] < 0.25:
+            return  # one physical tap often reports twice
+        self._taps.append(now)
+        self.stats["taps"] += 1
+        if len(self._taps) == 1:
+            threading.Thread(target=self._resolve_taps, daemon=True).start()
+
+    def _resolve_taps(self):
+        time.sleep(0.8)
+        taps, self._taps = len(self._taps), []
+        try:
+            if taps >= 2:
+                from .brain import status_report
+                self.say(status_report())
+            elif self.focus:
+                left = int((self.focus["end"] - time.time() + 59) // 60)
+                self.stop_focus()
+                self.cube_color(None)
+                self.say(f"Focus timer stopped with {left} minute{'s' if left != 1 else ''} left.")
+            else:
+                self.start_focus()
+        except Exception as e:  # noqa: BLE001
+            log(f"cube tap action failed: {e}")
+
+    # ------------------------------------------------------------ desk guard
+    def start_guard(self) -> dict:
+        if self.guard:
+            return self.guard_info()
+        self.guard = {"since": time.time(), "events": [], "id": int(time.time())}
+        threading.Thread(target=self._guard_loop, args=(self.guard["id"],), daemon=True).start()
+        try:
+            from anki_vector.util import degrees
+            jarvis = S.load().get("persona", {}).get("style") == "jarvis"
+            with self.control(wait=5) as r:
+                r.behavior.set_head_angle(degrees(8))
+                self.show(face_art.text("GUARD ON"), 1.5, with_control=r)
+                self.speak(r, "Desk guard on. I'll keep watch, sir." if jarvis else "Guard mode on. I'll watch your desk.")
+        except Exception as e:  # noqa: BLE001
+            log(f"guard start announce skipped: {e}")
+        log("desk guard on")
+        return self.guard_info()
+
+    def stop_guard(self, report: bool = False) -> dict:
+        g, self.guard = self.guard, None
+        if not g:
+            return {"on": False}
+        n = len(g["events"])
+        log(f"desk guard off ({n} events)")
+        if report:
+            jarvis = S.load().get("persona", {}).get("style") == "jarvis"
+            if n == 0:
+                msg = "Welcome back, sir. All quiet while you were away." if jarvis else f"Welcome back {OWNER}! All quiet while you were gone."
+            else:
+                first = datetime.fromtimestamp(g["events"][0]["at"]).strftime("%-I:%M")
+                msg = (f"Welcome back{', sir' if jarvis else ' ' + OWNER}. I saw movement at your desk {n} "
+                       f"time{'s' if n != 1 else ''}, first at {first}. The photos are in the app.")
+            try:
+                self.say(msg)
+            except Exception:  # noqa: BLE001
+                pass
+        return {"on": False, "events": g["events"]}
+
+    def guard_info(self) -> dict:
+        g = self.guard
+        return {"on": bool(g), "since": g["since"] if g else None, "events": g["events"][-20:] if g else []}
+
+    GUARD_DIR = S.DATA_DIR / "guard"
+
+    def _guard_loop(self, gid: int):
+        from PIL import Image, ImageChops, ImageStat
+        prev, last_alert = None, 0.0
+        while self.guard and self.guard["id"] == gid:
+            time.sleep(1.2)
+            if not self.connected or time.time() < self.speaking_until:
+                prev = None
+                continue
+            raw = self.raw
+            try:
+                st = raw.status
+                if getattr(st, "are_motors_moving", False) or getattr(st, "is_animating", False):
+                    prev = None  # he's moving his own head: not an intruder
+                    continue
+                img = self.call(lambda: raw.camera.capture_single_image().raw_image, 10, "guard_capture")
+            except VectorOffline:
+                prev = None
+                continue
+            except Exception:  # noqa: BLE001
+                prev = None
+                continue
+            small = img.convert("L").resize((64, 36))
+            if prev is not None:
+                diff = ImageStat.Stat(ImageChops.difference(small, prev)).mean[0]
+                if diff > 10 and time.time() - last_alert > 20:
+                    last_alert = time.time()
+                    ev = {"at": time.time(), "kind": "motion", "score": round(diff, 1), "photo": None}
+                    if S.load()["guard"].get("save_photos", True):
+                        self.GUARD_DIR.mkdir(parents=True, exist_ok=True)
+                        name = datetime.now().strftime("%Y%m%d-%H%M%S") + ".jpg"
+                        img.convert("RGB").save(self.GUARD_DIR / name, quality=85)
+                        ev["photo"] = name
+                    if self.guard and self.guard["id"] == gid:
+                        self.guard["events"].append(ev)
+                    log(f"guard: movement (score {diff:.0f})")
+                    if S.load()["guard"].get("notify", True):
+                        mac_notify("Vector desk guard", f"Movement at your desk at {datetime.now():%-I:%M %p}")
+            prev = small
+
     # ------------------------------------------------------------ greetings
     def _on_face(self, robot, event_type, event, *a):
         try:
             name = (getattr(event, "name", "") or "").strip()
         except Exception:  # noqa: BLE001
+            return
+        if self.guard and name.lower() == OWNER.lower():
+            self.last_greet[name] = time.time()
+            threading.Thread(target=self.stop_guard, args=(True,), daemon=True).start()
             return
         if not name or not prefs()["greetings"] or self.scanning or self.focus:
             return
@@ -637,7 +888,7 @@ class Companion:
                 trig = self.find_trigger("GreetAfterLongTime", "OnboardingReactToFaceHappy", "ReactToGreeting")
                 if trig and len(text) < 40:
                     r.anim.play_animation_trigger(trig)
-                r.behavior.say_text(text)
+                self.speak(r, text)
             log(f"greet {name}: {text}")
         except Exception as e:  # noqa: BLE001
             log(f"greet skipped: {e}")
@@ -708,7 +959,15 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, {"connected": COMP.connected, "serial": COMP.serial, "error": COMP.error,
                                         "scanning": COMP.scanning, "triggers": len(COMP.triggers),
                                         "focus": {"left_s": int(f["end"] - time.time()), "total": f["total"]} if f else None,
-                                        "prefs": prefs(), "safety": safety()})
+                                        "prefs": prefs(), "safety": safety(), "guard": bool(COMP.guard),
+                                        "speaking": time.time() < COMP.speaking_until, "voice": COMP.voice_engine(),
+                                        "cube": COMP.cube_connected})
+            if u.path == "/stats":
+                return self._send(200, COMP.stats_summary())
+            if u.path == "/guard":
+                return self._send(200, COMP.guard_info())
+            if u.path.startswith("/guard_photo/"):
+                return self._send(200, (Companion.GUARD_DIR / os.path.basename(u.path)).read_bytes(), "image/jpeg")
             if u.path == "/sensors":
                 return self._send(200, COMP.sensors())
             if u.path == "/map.png":
@@ -769,6 +1028,15 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, {"ok": True, "focus": COMP.start_focus(b.get("minutes"))})
             elif u.path == "/greet_test":
                 return self._send(200, {"ok": True, "text": COMP.greeting_text(OWNER)})
+            elif u.path == "/guard":
+                info = COMP.start_guard() if b.get("on", True) else COMP.stop_guard(bool(b.get("report")))
+                return self._send(200, {"ok": True, **info})
+            elif u.path == "/cube":
+                if b.get("connect"):
+                    COMP.cube_connected = False
+                    threading.Thread(target=COMP._connect_cube, daemon=True).start()
+                else:
+                    COMP.cube_color(b.get("color"), float(b.get("seconds", 3)))
             elif u.path == "/reconnect":
                 COMP.mark_dead("manual reconnect")
             else:

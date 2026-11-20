@@ -147,6 +147,12 @@ def ask(jpeg: bytes, mode: str = "explain", question: str = "") -> dict:
             body.pop("think")  # model without a thinking switch
             r = _post(base + "/api/chat", body, {}, 300)
         out = re.sub(r"<think>.*?</think>", "", r["message"]["content"], flags=re.S).strip()
+        if not out and r.get("done_reason") == "length":  # it thought the whole time: give it room to answer
+            body["options"]["num_predict"] = 6000
+            r = _post(base + "/api/chat", body, {}, 420)
+            out = re.sub(r"<think>.*?</think>", "", r["message"]["content"], flags=re.S).strip()
+        if not out:
+            out = "SAY: I looked, but my vision model didn't give me an answer. Try again, or add a ChatGPT or Gemini key.\n\nNo answer came back."
     say, body = split_say(out)
     return {"mode": mode, "title": title, "say": say, "text": body, "backend": backend, "model": model,
             "seconds": round(time.time() - t0, 1)}

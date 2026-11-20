@@ -24,6 +24,10 @@
         <a data-go="actions"><i class="ic" style="--c:#ff9f0a">%spark%</i>Actions</a>
       </div>
       <div class="nav-group">
+        <a data-go="jarvis"><i class="ic" style="--c:#0a84ff">%mic%</i>Hey Jarvis</a>
+        <a data-go="guard"><i class="ic" style="--c:#30d158">%shield%</i>Desk Guard &amp; Cube</a>
+      </div>
+      <div class="nav-group">
         <a data-go="personality"><i class="ic" style="--c:#ff375f">%heart%</i>Personality</a>
         <a data-go="voice"><i class="ic" style="--c:#ff2d55">%wave%</i>Voice &amp; Sound</a>
         <a data-go="eyes"><i class="ic" style="--c:#64d2ff">%eye%</i>Eyes</a>
@@ -170,7 +174,10 @@
       <div class="group">
         <div class="row"><div class="rl">Hearts when you pet him<small>Hold your finger on his back for a second</small></div><div class="rr"><label class="sw"><input type="checkbox" data-c="pet_hearts"><span></span></label></div></div>
         <div class="row"><div class="rl">Greet people he recognizes</div><div class="rr"><label class="sw"><input type="checkbox" data-c="greetings"><span></span></label></div></div>
-        <div class="row"><div class="rl">Morning briefing<small>First time he sees you before 11 AM: time, your list, reminders</small></div><div class="rr"><label class="sw"><input type="checkbox" data-c="morning_briefing"><span></span></label></div></div>
+        <div class="row"><div class="rl">Morning briefing<small>First time he sees you before 11 AM: time, weather, your list, reminders</small></div><div class="rr"><label class="sw"><input type="checkbox" data-c="morning_briefing"><span></span></label></div></div>
+        <div class="row"><div class="rl">Weather in briefings<small>Free, no key needed</small></div><div class="rr"><label class="sw"><input type="checkbox" data-k="weather.enabled"><span></span></label></div></div>
+        <div class="row"><div class="rl">Weather for</div><div class="rr grow"><input class="field" data-k="weather.place" placeholder="Bellevue, WA"></div></div>
+        <div class="row"><div class="rl">Units</div><div class="rr"><div class="seg" data-k="weather.units"><button data-v="fahrenheit">&deg;F</button><button data-v="celsius">&deg;C</button></div></div></div>
         <div class="row"><div class="rl">Show icons on his face for notifications</div><div class="rr"><label class="sw"><input type="checkbox" data-c="face_icons"><span></span></label></div></div>
       </div>
       <div class="group-title">Focus timer</div>
@@ -189,6 +196,60 @@
       <div class="group-title">Animations <span class="hint" id="anim-count"></span></div>
       <div class="group"><div class="row"><div class="rr grow"><input id="anim-q" class="field" style="text-align:left" placeholder="Search: happy, dance, sneeze, fist bump, sad..."></div></div></div>
       <div class="anim-list" id="anim-list"></div>
+    </section>
+
+    <!-- HEY JARVIS -->
+    <section id="jarvis" class="page">
+      <h2 class="ptitle">Hey Jarvis</h2>
+      <p class="lead">Talk to Vector through your Mac's microphone. No waiting for his lights: just say it in one go, like <b>"Hey Jarvis, what's the weather?"</b>, then keep talking for follow-ups. Say <b>"that's all"</b> to finish.</p>
+      <div class="group">
+        <div class="row"><div class="rl">Status<small id="ears-sub"></small></div><div class="rr" id="ears-state">--</div></div>
+        <div class="row"><div class="rl">Last heard<small id="ears-reply"></small></div><div class="rr mute" id="ears-text">--</div></div>
+      </div>
+      <div class="group-title">Listening</div>
+      <div class="group">
+        <div class="row"><div class="rl">Listen for the wake word</div><div class="rr"><label class="sw"><input type="checkbox" data-k="ears.enabled"><span></span></label></div></div>
+        <div class="row"><div class="rl">Wake word</div><div class="rr"><div class="seg" data-k="ears.wake_word"><button data-v="hey_jarvis">Hey Jarvis</button><button data-v="hey_mycroft">Hey Mycroft</button><button data-v="alexa">Alexa</button></div></div></div>
+        <div class="row"><div class="rl">Sensitivity<small>Higher hears you from farther away but may wake by accident</small></div><div class="rr grow"><input type="range" class="slider" min="0.1" max="0.9" step="0.1" data-k="ears.sensitivity"></div></div>
+        <div class="row"><div class="rl">Follow-up questions without the wake word</div><div class="rr"><label class="sw"><input type="checkbox" data-k="ears.follow_up"><span></span></label></div></div>
+        <div class="row"><div class="rl">Chime when he hears you</div><div class="rr"><label class="sw"><input type="checkbox" data-k="ears.chime"><span></span></label></div></div>
+        <div class="row"><div class="rl">Not responding?<small>Restarts the listener. If macOS asks about the microphone, click Allow.</small></div><div class="rr"><button class="btn small" id="ears-restart">Restart Ears</button></div></div>
+      </div>
+      <div class="group-title">His voice</div>
+      <div class="group">
+        <div class="row"><div class="rl">Voice<small>Auto: a British JARVIS voice when the JARVIS personality is on, his own robot voice otherwise</small></div><div class="rr"><div class="seg" data-k="voice.engine"><button data-v="auto">Auto</button><button data-v="robot">Robot</button><button data-v="mac">JARVIS</button></div></div></div>
+        <div class="row"><div class="rl">JARVIS voice</div><div class="rr"><select class="field sel" id="voices" data-k="voice.mac_voice"></select></div></div>
+        <div class="row"><div class="rl">Speed</div><div class="rr grow"><input type="range" class="slider" min="140" max="240" step="10" data-k="voice.rate"></div></div>
+        <div class="row"><div class="rl">Loudness</div><div class="rr grow"><input type="range" class="slider" min="30" max="100" step="5" data-k="voice.volume"></div></div>
+        <div class="row"><div class="rl">Try it</div><div class="rr grow"><input id="voice-try" class="field" value="Good evening, sir. All systems are online." ><button class="btn primary small" id="voice-try-btn">Speak</button></div></div>
+      </div>
+      <div class="group-title">Things to say</div>
+      <div class="group tips">
+        <div class="row"><div class="rl">"what's the weather" · "do I need a jacket tomorrow"</div></div>
+        <div class="row"><div class="rl">"check my homework" · "read this" · "what am I holding"</div></div>
+        <div class="row"><div class="rl">"start a focus timer" · "how much time is left" · "stop the timer"</div></div>
+        <div class="row"><div class="rl">"guard my desk" · "status report" · "what did Claude do"</div></div>
+        <div class="row"><div class="rl">"add flashcards to my list" · "remember that my bio test is Friday"</div></div>
+        <div class="row"><div class="rl">...or ask anything: "explain mitosis like I'm visual"</div></div>
+      </div>
+    </section>
+
+    <!-- DESK GUARD + CUBE -->
+    <section id="guard" class="page">
+      <h2 class="ptitle">Desk Guard &amp; Cube</h2>
+      <div class="group">
+        <div class="row"><div class="rl">Desk guard<small>He watches your desk from the charger and saves a photo when something moves. When he recognizes your face, he turns it off and tells you what happened.</small></div><div class="rr"><label class="sw"><input type="checkbox" id="guard-on"><span></span></label></div></div>
+        <div class="row"><div class="rl">Status</div><div class="rr mute" id="guard-state">--</div></div>
+        <div class="row"><div class="rl">Notify my Mac</div><div class="rr"><label class="sw"><input type="checkbox" data-k="guard.notify"><span></span></label></div></div>
+        <div class="row"><div class="rl">Save photos</div><div class="rr"><label class="sw"><input type="checkbox" data-k="guard.save_photos"><span></span></label></div></div>
+      </div>
+      <div class="group-title">What he saw</div>
+      <div class="photos" id="guard-events"></div>
+      <div class="group-title">Cube button</div>
+      <div class="group">
+        <div class="row"><div class="rl">Use the cube as a desk button<small>Tap once: start or stop a focus timer (lights go green, yellow, red). Tap twice: status report.</small></div><div class="rr"><label class="sw"><input type="checkbox" data-k="companion.cube_button"><span></span></label></div></div>
+        <div class="row"><div class="rl">Cube<small id="cube-sub">Needs a fresh N battery (E90 / LR1)</small></div><div class="rr"><span id="cube-state" class="mute">--</span> <button class="btn small" id="cube-connect">Connect</button> <button class="btn small" id="cube-light">Light up</button></div></div>
+      </div>
     </section>
 
     <!-- VOICE -->
@@ -321,6 +382,8 @@
     <section id="about" class="page">
       <h2 class="ptitle">Diagnostics</h2>
       <div class="group" id="about-rows"></div>
+      <div class="group-title">Hearing &amp; Wi-Fi <span class="hint">last 24 hours</span></div>
+      <div class="group" id="net-rows"></div>
       <div class="group-title">Lifetime</div>
       <div class="group" id="stats"></div>
       <div class="group-title">Brain log</div>

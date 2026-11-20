@@ -268,6 +268,51 @@ def restart_brain() -> bool:
         return False
 
 
+def ears_status() -> dict:
+    try:
+        st = json.loads((S.DATA_DIR / "ears.json").read_text())
+    except Exception:  # noqa: BLE001
+        st = {}
+    try:
+        st["running"] = subprocess.run(["pgrep", "-f", "vector_companion.ears"], capture_output=True,
+                                       timeout=3).returncode == 0
+    except Exception:  # noqa: BLE001
+        st["running"] = False
+    return st
+
+
+def restart_ears() -> bool:
+    subprocess.run(["pkill", "-f", "vector_companion.ears"], capture_output=True, timeout=5)
+    time.sleep(0.8)
+    app = "/Applications/Vector Ears.app"
+    if os.path.exists(app):
+        return subprocess.run(["open", "-g", "-a", app], capture_output=True, timeout=10).returncode == 0
+    subprocess.Popen([str(config.ROOT / ".venv/bin/python"), "-m", "vector_companion.ears"], cwd=str(config.ROOT),
+                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+    return True
+
+
+_voices: list[str] = []
+
+
+def mac_voices() -> list[str]:
+    """English voices from `say -v ?`, British ones first (JARVIS)."""
+    global _voices
+    if not _voices:
+        try:
+            out = subprocess.run(["say", "-v", "?"], capture_output=True, text=True, timeout=8).stdout
+        except Exception:  # noqa: BLE001
+            out = ""
+        rows = []
+        for line in out.splitlines():
+            parts = line.split("#")[0].split()
+            if len(parts) >= 2 and parts[-1].startswith("en_"):
+                rows.append((" ".join(parts[:-1]), parts[-1]))
+        rows.sort(key=lambda r: (r[1] != "en_GB", r[0]))
+        _voices = [n for n, _ in rows]
+    return _voices
+
+
 def ollama_models() -> list[str]:
     try:
         return [m["name"] for m in json.loads(_get(OLLAMA + "/api/tags", 3)).get("models", [])]
@@ -379,6 +424,14 @@ class Handler(BaseHTTPRequestHandler):
                     return self._json(cc.call("/health", timeout=2))
                 except Exception as e:  # noqa: BLE001
                     return self._json({"connected": False, "running": False, "error": str(e)})
+            if path in ("/api/companion/stats", "/api/companion/guard"):
+                return self._json(cc.call(path[len("/api/companion"):], timeout=4))
+            if path.startswith("/api/guard_photo/"):
+                return self._send(200, cc.call("/guard_photo/" + os.path.basename(path), timeout=6), "image/jpeg")
+            if path == "/api/ears":
+                return self._json(ears_status())
+            if path == "/api/voices":
+                return self._json(mac_voices())
             if path == "/api/sensors":
                 return self._json(cc.call("/sensors", timeout=3))
             if path == "/api/map.png":
@@ -448,13 +501,15 @@ class Handler(BaseHTTPRequestHandler):
             if path.startswith("/api/companion/"):
                 sub = path[len("/api/companion"):]
                 if sub not in ("/face", "/head", "/lift", "/anim", "/scan", "/focus", "/greet_test", "/say",
-                               "/dock", "/reconnect", "/stop"):
+                               "/dock", "/reconnect", "/stop", "/guard", "/cube"):
                     return self._json({"error": "not allowed"}, 403)
                 r = cc.call(sub, b, timeout=180 if sub == "/scan" else 60)
                 return self._json(r, 200 if (not isinstance(r, dict) or r.get("ok", True)) else 503)
             if path == "/api/settings":
                 return self._json({"app": S.save(b.get("app", {})),
                                    "brain": save_brain(b["brain"]) if "brain" in b else brain_settings()})
+            if path == "/api/ears/restart":
+                return self._json({"ok": restart_ears()})
             if path == "/api/brain/restart":
                 return self._json({"ok": restart_brain()})
             if path == "/api/test_notify":

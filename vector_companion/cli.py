@@ -48,6 +48,9 @@ def main(argv=None):
     if argv and argv[0] == "voice":  # called by wire-pod custom intents
         from .voice import main as voice_main
         return voice_main(argv[1:])
+    if argv and argv[0] == "ears":  # "Hey Jarvis" listener (normally runs as Vector Ears.app)
+        from .ears import main as ears_main
+        return ears_main(argv[1:])
     p = argparse.ArgumentParser(prog="vector")
     sub = p.add_subparsers(dest="cmd", required=True)
     s = sub.add_parser("say"); s.add_argument("text", nargs="+")

@@ -83,12 +83,44 @@ if command -v claude >/dev/null 2>&1; then
   claude mcp add --scope user vector -- "$PY" -m vector_companion.mcp_server >/dev/null && echo "   Claude Code: updated"
 fi
 
+step "Fast talking model"
+if command -v ollama >/dev/null 2>&1; then
+  if ollama list 2>/dev/null | grep -q "^llama3.2:3b"; then echo "   llama3.2:3b ready (answers in 1-2 s)"
+  else ollama pull llama3.2:3b && echo "   llama3.2:3b installed"; fi
+fi
+
 step "Vector app"
-NO_OPEN=1 bash "$ROOT/install_app.sh" >/dev/null && echo "   /Applications/Vector.app rebuilt"
+NO_OPEN=1 bash "$ROOT/install_app.sh" >/dev/null && echo "   /Applications/Vector.app and Vector Ears.app rebuilt"
+
+step "Hey Jarvis (your Mac's microphone)"
+if "$ROOT/.venv/bin/pip" install -q "openwakeword>=0.6" sounddevice faster-whisper onnxruntime scipy; then
+  "$PY" -m vector_companion.ears --setup || echo "   model download failed; it will retry the first time Ears starts"
+  EPLIST="$HOME/Library/LaunchAgents/com.rushil.vector-ears.plist"
+  cat > "$EPLIST" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>Label</key><string>com.rushil.vector-ears</string>
+  <key>ProgramArguments</key><array>
+    <string>/usr/bin/open</string><string>-g</string><string>-j</string><string>-a</string><string>/Applications/Vector Ears.app</string>
+  </array>
+  <key>RunAtLoad</key><true/>
+</dict></plist>
+EOF
+  pkill -f "vector_companion.ears" 2>/dev/null || true
+  sleep 1
+  launchctl unload "$EPLIST" 2>/dev/null || true
+  launchctl load "$EPLIST"
+  echo "   Vector Ears started. If macOS asks to let \"Vector Ears\" use the microphone, click Allow."
+else
+  echo "   couldn't install the speech packages; Hey Jarvis is off (everything else works)"
+fi
 
 step "Done"
 cat <<EOF
-Say "Hey Vector", wait for his lights, then "I have a question..." and:
+Say "Hey Jarvis" near your Mac (no waiting), e.g. "Hey Jarvis, what's the weather?"
+Then just keep talking for a follow-up. Also: "guard my desk", "check my homework".
+Or say "Hey Vector", wait for his lights, then "I have a question..." and:
   "status report"                       "good morning"         "what did Claude do"
   "check my homework" (hold the page up)  "what am I holding"
   "start a 25 minute focus timer"       "good night"

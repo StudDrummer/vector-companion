@@ -12,6 +12,7 @@ dependencies = ["mcp>=1.2,<2", "pillow"]
 [project.optional-dependencies]
 sdk = ["wirepod_vector_sdk"]
 app = ["pywebview>=5"]
+ears = ["openwakeword>=0.6", "sounddevice", "faster-whisper", "onnxruntime", "scipy"]
 
 [project.scripts]
 vector = "vector_companion.cli:main"

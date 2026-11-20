@@ -179,9 +179,35 @@ A native Mac window in the style of System Settings:
 | anything else | answered by the AI you picked, in the personality you picked |
 
 ### Personality styles
-Brain & Memory > Personality: **Vector** (playful), **JARVIS** (calm British butler, calls you sir) or
-**FRIDAY** (quick, upbeat, calls you boss). It changes his answers, greetings, briefings and announcements.
-The wake word stays "Hey Vector" (it's built into his firmware).
+Brain & Memory > Personality: **Vector** (playful) or **JARVIS** (calm, quick British butler who calls
+you sir and offers the obvious next step). It changes his answers, greetings, briefings and announcements.
+His own wake word stays "Hey Vector" (it's built into his firmware), so "Hey Jarvis" runs on the Mac (below).
+
+## 9. Hey Jarvis (your Mac's microphone)
+`Vector Ears.app` (installed and started by `./upgrade.sh`, runs in the background at login) listens for
+**"Hey Jarvis"** with [openWakeWord](https://github.com/dscripka/openWakeWord) and transcribes with
+Whisper, all offline on the Mac. Say it in one breath: "Hey Jarvis, what's the weather tomorrow?",
+then keep talking for follow-ups without the wake word; "that's all" ends it. This avoids the two weak
+spots of "Hey Vector": his small microphones and his Wi-Fi link to WirePod.
+Settings (wake word: Hey Jarvis / Hey Mycroft / Alexa, sensitivity, follow-ups, chime) are on the
+**Hey Jarvis** page. If it doesn't respond, click Restart Ears and allow the microphone.
+
+**JARVIS voice:** with the JARVIS personality (or Voice set to JARVIS), he speaks with a Mac voice
+(Daniel, British, by default) streamed through his own speaker. Falls back to his robot voice automatically.
+
+## 10. Desk guard, cube button, weather
+- **Desk guard**: "Hey Jarvis, guard my desk" (or the Desk Guard page). He watches from the charger, saves a
+  photo and notifies the Mac when something moves, and when he recognizes you he turns it off and tells
+  you what happened.
+- **Cube button** (needs a fresh N / E90 battery in the cube): tap once to start or stop a focus timer
+  (cube lights go green, yellow, red), tap twice for a status report.
+- **Weather**: in the morning briefing and "what's the weather", from Open-Meteo (free, no key).
+  Set the place on the Personality page.
+- **Hearing & Wi-Fi** (Diagnostics): how often he dropped off Wi-Fi and how often he heard "Hey Vector".
+
+The brain talks with a fast model (llama3.2:3b) even if you picked a "thinking" model like qwen3-vl:
+those spend their answer budget thinking and return nothing. Thinking models are still used for
+homework photos, where the reasoning helps.
 
 ### Smarter announcements
 When Claude Code finishes, Vector reads Claude's final message and says what it did, where:
@@ -191,7 +217,7 @@ terminal badge and say which folder they ran in.
 
 ### Your AI apps get a body
 The MCP server (tools: say, look (HD camera), show on face, head angle, lift height, animations,
-focus timer, drive, eyes, actions, faces) is added to Claude Code, Claude Desktop and Gemini CLI by
+focus timer, desk guard, weather, drive, eyes, actions, faces) is added to Claude Code, Claude Desktop and Gemini CLI by
 `upgrade.sh`. Ask any of them things like "look through Vector's camera and tell me what's on my desk",
 "put a heart on Vector's face", or "when the tests pass, make Vector celebrate".
 ChatGPT's desktop app can't load local MCP servers, so use ChatGPT as Vector's *brain* instead

@@ -40,6 +40,9 @@ COMMANDS = {
     "list-add": ["to my list", "to my to do list"],
     "list-read": ["what's on my list", "what is on my list", "read my list"],
     "list-clear": ["clear my list"],
+    "weather": ["the weather", "weather like", "need an umbrella", "need a jacket", "weather tomorrow"],
+    "guard": ["guard my desk", "guard mode", "watch my desk", "keep watch"],
+    "guard-off": ["stop guarding", "guard off", "i'm back"],
 }
 ACK_INTENT = "intent_imperative_affirmative"  # Vector's small "okay" reaction while we work
 
@@ -69,26 +72,38 @@ def install() -> int:
     return n
 
 
-def _speak(text: str) -> None:
+def speak(text: str) -> None:
+    """Vector says it (in the chosen voice) through the companion; falls back to wire-pod."""
+    if not (text or "").strip():
+        return
     from .companion_client import call
     try:
-        call("/say", {"text": text}, timeout=60)
+        call("/say", {"text": text}, timeout=90)
     except Exception:  # noqa: BLE001
         from .wirepod import Vector
         Vector().say(text)
 
 
-def handle(text: str) -> None:
+_speak = speak
+
+
+def respond(text: str, history: list[dict] | None = None) -> str:
+    """Answer one thing you said: built-in skills first (timer, list, weather, homework...), else the AI."""
     from . import brain
+    reply = brain.local_skill(text)
+    if reply is None:
+        msgs, _ = brain.build_messages((history or [])[-8:] + [{"role": "user", "content": text}])
+        reply = "".join(brain.stream_llm(msgs)).strip() or "Sorry, I didn't catch that."
+    return brain.speakable(reply)
+
+
+def handle(text: str) -> None:
     text = text.strip().strip('"').strip()
     S.log("voice", f"heard: {text}")
     time.sleep(1.8)  # let Vector finish his little acknowledgment
-    reply = brain.local_skill(text)
-    if reply is None:  # shouldn't happen for our phrases, but fall back to the AI
-        msgs, _ = brain.build_messages([{"role": "user", "content": text}])
-        reply = "".join(brain.stream_llm(msgs)).strip() or "Sorry, I didn't catch that."
+    reply = respond(text)
     S.log("voice", f"reply: {reply}")
-    _speak(brain.speakable(reply))
+    speak(reply)
 
 
 def main(argv: list[str]) -> None:

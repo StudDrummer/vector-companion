@@ -103,6 +103,22 @@ def vector_focus_timer(minutes: int = 25, stop: bool = False) -> str:
 
 
 @mcp.tool()
+def vector_desk_guard(on: bool = True) -> str:
+    """Turn desk guard on or off. While on, Vector watches the desk from his charger, saves a photo and
+    notifies the Mac when something moves, and turns it off himself when he recognizes his owner."""
+    r = _c("/guard", {"on": on, "report": False})
+    n = len((r or {}).get("events") or [])
+    return "guard on" if on else f"guard off ({n} movement events)"
+
+
+@mcp.tool()
+def vector_weather(day: str = "today") -> str:
+    """Today's or tomorrow's weather where the user lives (day: today or tomorrow), as one spoken sentence."""
+    from . import weather
+    return weather.sentence("tomorrow" if day.lower().startswith("tom") else "today")
+
+
+@mcp.tool()
 def vector_drive(left_mm_s: float, right_mm_s: float, seconds: float) -> str:
     """Drive the wheels. Speeds -200..200 mm/s; equal = straight, opposite = spin. Max 10 s.
     Be careful near table edges."""

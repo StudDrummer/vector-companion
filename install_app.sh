@@ -42,6 +42,9 @@ EOF
 cat > "$APP/Contents/MacOS/Vector" <<EOF
 #!/bin/bash
 cd "$ROOT"
+if [ "\$(sysctl -n hw.optional.arm64 2>/dev/null)" = "1" ]; then
+  exec /usr/bin/arch -arm64 "$PY" -m vector_companion.app >> "$ROOT/logs/app.log" 2>&1
+fi
 exec "$PY" -m vector_companion.app >> "$ROOT/logs/app.log" 2>&1
 EOF
 chmod +x "$APP/Contents/MacOS/Vector"
@@ -66,6 +69,7 @@ cat > "$EARS/Contents/Info.plist" <<EOF
   <key>CFBundleIconFile</key><string>AppIcon</string>
   <key>LSMinimumSystemVersion</key><string>11.0</string>
   <key>LSUIElement</key><true/>
+  <key>LSArchitecturePriority</key><array><string>arm64</string><string>x86_64</string></array>
   <key>NSMicrophoneUsageDescription</key><string>Vector listens for "Hey Jarvis" so you can talk to your robot. Audio stays on this Mac.</string>
 </dict></plist>
 EOF
@@ -73,6 +77,10 @@ cat > "$EARS/Contents/MacOS/VectorEars" <<EOF
 #!/bin/bash
 cd "$ROOT"
 pgrep -f "vector_companion.ears" >/dev/null && exit 0   # only one copy
+# script-based apps can be launched under Rosetta (Intel); the Python packages are Apple Silicon
+if [ "\$(sysctl -n hw.optional.arm64 2>/dev/null)" = "1" ]; then
+  exec /usr/bin/arch -arm64 "$PY" -m vector_companion.ears >> "$ROOT/logs/ears.out" 2>&1
+fi
 exec "$PY" -m vector_companion.ears >> "$ROOT/logs/ears.out" 2>&1
 EOF
 chmod +x "$EARS/Contents/MacOS/VectorEars"

@@ -29,7 +29,7 @@ def persona() -> str:
 def address() -> str:
     """How announcements address you, by personality style."""
     owner = os.environ.get("VECTOR_OWNER", "Rushil")
-    return {"jarvis": "Sir, ", "friday": "Hey boss, "}.get(persona(), f"{owner}, " if persona() == "vector_named" else "")
+    return {"jarvis": "Sir, "}.get(persona(), "")
 
 
 # ------------------------------------------------------------------ helpers

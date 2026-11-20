@@ -59,11 +59,10 @@ DEFAULT_MODELS = {
 
 STYLES = {
     "vector": "",
-    "jarvis": ("Personality: you speak like a calm, impeccably polite British AI butler with a dry, understated wit "
-               "(think a sophisticated house AI for an inventor). Address the user as 'sir'. Be precise and unflappable; "
-               "a little gentle sarcasm is welcome. Never claim to be a movie character."),
-    "friday": ("Personality: you're a quick, upbeat, casual AI sidekick with a warm Irish lilt in your phrasing. "
-               "Call the user 'boss'. Keep it snappy and practical. Never claim to be a movie character."),
+    "jarvis": ("Personality: you are a JARVIS-style AI: a calm, impeccably polite British butler with a dry, "
+               "understated wit, who is also quick, practical and upbeat. Address the user as 'sir'. "
+               "Lead with the answer, keep it brief, and when it helps, proactively offer the obvious next step "
+               "(a focus timer, a reminder, checking his homework). Never claim to be a movie character."),
 }
 
 
@@ -185,7 +184,7 @@ def local_skill(utterance: str) -> str | None:
         if re.search(r"forget everything", t):
             _save(MEMORY_FILE, [])
             return "Okay. My memory is wiped clean."
-        m = re.match(r"^(?:please )?add (.+?) to (?:my )?(?:to do |todo |to-do )?list$", t)
+        m = re.search(r"\badd (.+?) to (?:my )?(?:to do |todo |to-do )?list$", t)
         if m:
             todo = _load(TODO_FILE, [])
             item = orig[m.start(1):m.end(1)]
@@ -215,7 +214,7 @@ def local_skill(utterance: str) -> str | None:
                 msg += " Tomorrow: " + "; ".join(soon[:2]) + "."
             threading.Timer(6, lambda: _wp_intent("intent_system_sleep")).start()
             return msg + " Sleep well."
-        if re.fullmatch(r"(good )?morning.*|(give me|what'?s) (my|the) (briefing|morning briefing)", t):
+        if re.fullmatch(r"(good )?morning.*", t) or "briefing" in t:
             return briefing()
         scan_mode = _scan_mode(t)
         if scan_mode:
@@ -235,7 +234,7 @@ def local_skill(utterance: str) -> str | None:
             except Exception:  # noqa: BLE001
                 pass
             return "Timer stopped."
-        if re.search(r"how (much|long).*(left|remaining)", t):
+        if re.search(r"how (much|long).*(left|remaining)|time (is )?left|how much longer", t):
             try:
                 from .companion_client import call
                 f = call("/health").get("focus")
@@ -266,7 +265,7 @@ def _style() -> str:
 
 
 def _addr() -> str:
-    return {"jarvis": "Sir, ", "friday": "Boss, "}.get(_style(), "")
+    return {"jarvis": "Sir, "}.get(_style(), "")
 
 
 def _recent(kind: str):
@@ -319,7 +318,7 @@ def _battery_word() -> str | None:
 def briefing() -> str:
     now = datetime.now()
     part = "morning" if now.hour < 12 else "afternoon" if now.hour < 17 else "evening"
-    who = "sir" if _style() == "jarvis" else "boss" if _style() == "friday" else OWNER
+    who = "sir" if _style() == "jarvis" else OWNER
     out = [f"Good {part}, {who}. It's {now:%-I:%M} on {now:%A}."]
     todo = _load(TODO_FILE, [])
     if todo:
@@ -370,7 +369,7 @@ def _scan_mode(t: str) -> str | None:
         return "solve"
     if re.search(r"(scan|check|look at|help me with) (my |this |the )?(homework|worksheet|problem|work|notes|answer)", t):
         return "explain"
-    if re.search(r"read (this|that|my|the) ?(page|text|note|paper)?$|read it", t):
+    if re.search(r"\bread (this|that|my|the|it)\b", t):
         return "read"
     if re.search(r"what do you see|what am i holding|what is this|what's this|look at this", t):
         return "describe"

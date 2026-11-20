@@ -216,3 +216,11 @@ kbd{display:inline-block;min-width:20px;padding:0 5px;border-radius:5px;backgrou
 .anim-list{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:6px;max-height:340px;overflow:auto;padding:2px}
 .anim-list button{background:var(--cell);border:none;border-radius:8px;padding:7px 10px;text-align:left;font-size:12px;cursor:default;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .anim-list button:hover{background:var(--cell-hi)}
+
+.joy-lock{display:none;position:absolute;inset:0;border-radius:50%;background:rgba(0,0,0,.55);color:#fff;flex-direction:column;align-items:center;justify-content:center;gap:4px;font-size:10.5px;font-weight:600;text-align:center;line-height:1.25}
+.joy-lock svg{width:18px;height:18px;stroke:#fff}
+.locked .joy-lock{display:flex}
+.locked .joy{opacity:.5;pointer-events:none}
+.map-card{position:relative;background:#121214;border-radius:14px;overflow:hidden;width:360px;max-width:100%;aspect-ratio:1}
+.map-card img{width:100%;height:100%;display:block;image-rendering:pixelated}
+.warn{color:var(--orange)}

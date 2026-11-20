@@ -19,6 +19,9 @@ SETTINGS_FILE = DATA_DIR / "settings.json"
 LOG_DIR = ROOT / "logs"
 ENV_FILE = ROOT / ".env"
 
+# built-in behaviors that drive him off the charger (blocked while the dock lock is on)
+DOCK_BLOCKED = {"dance", "explore", "come_here", "fetch_cube", "roll_cube", "pop_a_wheelie", "look_at_me"}
+
 DEFAULTS: dict = {
     "notify": {
         "claude_done": True,
@@ -31,6 +34,7 @@ DEFAULTS: dict = {
     },
     "quiet_hours": {"enabled": False, "start": "22:30", "end": "07:00"},
     "persona": {"style": "vector"},
+    "safety": {"dock_lock": True},
     "companion": {"pet_hearts": True, "greetings": True, "morning_briefing": True,
                   "face_icons": True, "focus_minutes": 25, "focus_checkins": True},
 }

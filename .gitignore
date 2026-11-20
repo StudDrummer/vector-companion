@@ -10,3 +10,4 @@ setup.log
 *.jpg
 !vector_companion/app/static/*.png
 .DS_Store
+build/

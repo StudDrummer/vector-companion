@@ -106,6 +106,9 @@ def vector_focus_timer(minutes: int = 25, stop: bool = False) -> str:
 def vector_drive(left_mm_s: float, right_mm_s: float, seconds: float) -> str:
     """Drive the wheels. Speeds -200..200 mm/s; equal = straight, opposite = spin. Max 10 s.
     Be careful near table edges."""
+    from . import settings as S
+    if S.load()["safety"]["dock_lock"]:
+        return "Refused: the dock lock is on (his battery is dead), so he must stay on the charger."
     bot().drive(left_mm_s, right_mm_s, seconds)
     return "done"
 
@@ -124,6 +127,9 @@ def vector_action(action: str) -> str:
     """Trigger a built-in behavior. Known: dance, sleep, go_to_charger, fetch_cube, explore,
     come_here, look_at_me, take_photo, roll_cube, blackjack, pop_a_wheelie, be_quiet.
     Raw 'intent_*' names also work."""
+    from . import settings as S
+    if S.load()["safety"]["dock_lock"] and action in S.DOCK_BLOCKED:
+        return f"Refused: {action} would take him off the charger while the dock lock is on."
     bot().intent(action)
     return f"triggered {INTENTS.get(action, action)}"
 

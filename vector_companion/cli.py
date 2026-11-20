@@ -44,6 +44,10 @@ def hook(event: str, rc: int = 0, seconds: float = 0, cmd: str = "", cwd: str = 
 
 def main(argv=None):
     config.load_env()
+    argv = sys.argv[1:] if argv is None else argv
+    if argv and argv[0] == "voice":  # called by wire-pod custom intents
+        from .voice import main as voice_main
+        return voice_main(argv[1:])
     p = argparse.ArgumentParser(prog="vector")
     sub = p.add_subparsers(dest="cmd", required=True)
     s = sub.add_parser("say"); s.add_argument("text", nargs="+")

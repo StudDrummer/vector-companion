@@ -53,6 +53,9 @@ echo "   companion running on http://127.0.0.1:47801 (brain restarted too)"
 step "Claude Code + terminal announcements"
 bash "$ROOT/install_notifications.sh" | sed 's/^/   /'
 
+echo "-> voice commands (registered in WirePod so they run before its built-ins)"
+"$PY" -m vector_companion.voice --install || echo "   WirePod isn't running; open it and re-run ./upgrade.sh"
+
 step "Vector control for your AI apps (MCP)"
 "$PY" - "$PY" <<'PYEOF'
 import json, shutil, sys

@@ -27,6 +27,7 @@ const P = {
   cards: '<rect x="3" y="6" width="11" height="15" rx="2"/><path d="M8 3h11a2 2 0 0 1 2 2v13"/>',
   moon: '<path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z"/>',
   pencil: '<path d="M4 20h4L19 9l-4-4L4 16z"/>',
+  lock: '<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>',
   doc: '<path d="M6 3h9l4 4v14H6z"/><path d="M14 3v5h5M9 13h7M9 17h5"/>',
   heart: '<path d="M12 20s-7-4.5-7-10a4 4 0 0 1 7-2.5A4 4 0 0 1 19 10c0 5.5-7 10-7 10z"/>',
   trash: '<path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/>',
@@ -62,7 +63,7 @@ const intent = (name, label) => wp("cloud_intent", { intent: name }, label || "S
 const say = text => text.trim() && tryApi("/api/say", { text }, "Speaking");
 
 /* ---------------- navigation ---------------- */
-const hooks = { drive: [startCam, stopDrive], scan: [startScan, stopScanCam], personality: [loadPersonality], people: [loadFaces], photos: [loadPhotos], brain: [loadBrain],
+const hooks = { drive: [enterDrive, leaveDrive], scan: [startScan, stopScanCam], personality: [loadPersonality], people: [loadFaces], photos: [loadPhotos], brain: [loadBrain],
   notify: [loadNotify], about: [loadAbout], eyes: [loadRobotSettings], general: [loadRobotSettings], voice: [loadRobotSettings] };
 let current = null;
 function go(id) {
@@ -73,6 +74,7 @@ function go(id) {
   $$(".page").forEach(p => p.classList.toggle("on", p.id === id));
   $$("#nav a").forEach(a => a.classList.toggle("on", a.dataset.go === id));
   if (hooks[id] && hooks[id][0]) hooks[id][0]();
+  if (id === "general") loadSafety();
   $("#main").scrollTop = 0;
 }
 $$("[data-go]").forEach(a => a.addEventListener("click", () => go(a.dataset.go)));
@@ -278,6 +280,7 @@ const typing = () => { const a = document.activeElement; return /TEXTAREA|SELECT
 document.addEventListener("keydown", e => {
   if (current !== "drive" || typing() || e.metaKey) return;
   const k = e.key.toLowerCase();
+  if (KEYMAP[k] && DOCK) { e.preventDefault(); if (!e.repeat) toast("Driving is locked while he charges (Safety > Dock lock)", true); return; }
   if (KEYMAP[k]) { e.preventDefault(); drive.keys.add(k); keysToDrive(); }
   else if (k === "r" || k === "f") setHead(+$("#head").value + (k === "r" ? 5 : -5));
   else if (k === "t" || k === "g") setLift(+$("#lift").value + (k === "t" ? 10 : -10));
@@ -288,6 +291,37 @@ document.addEventListener("keyup", e => {
   if (KEYMAP[k]) { drive.keys.delete(k); keysToDrive(); if (!drive.keys.size && !drive.active) halt({ lw: 0, rw: 0 }); }
 });
 window.addEventListener("blur", () => { if (current === "drive") stopDrive(); });
+
+/* ---------------- safety, sensors, map ---------------- */
+let DOCK = true, sensorT = null, mapT = null;
+async function loadSafety() {
+  try { const s = await api("/api/settings"); DOCK = s.app.safety ? s.app.safety.dock_lock : true; } catch { }
+  $("#dock-lock").checked = $("#dock-lock2").checked = DOCK;
+  document.querySelector(".joy-wrap").classList.toggle("locked", DOCK);
+}
+async function setDock(on) {
+  if (!on && !confirm("Turn off the dock lock? With his current battery he'll shut down as soon as he leaves the charger.")) { loadSafety(); return; }
+  await tryApi("/api/settings", { app: { safety: { dock_lock: on } } }, on ? "Dock lock on" : "Dock lock off: driving enabled");
+  loadSafety();
+}
+["#dock-lock", "#dock-lock2"].forEach(sel => $(sel).addEventListener("change", e => setDock(e.target.checked)));
+async function pollSensors() {
+  try {
+    const s = await api("/api/sensors");
+    $("#sn-charger").innerHTML = s.on_charger ? '<span class="ok">Yes</span>' : '<span class="warn">No</span>';
+    $("#sn-cliff").innerHTML = s.cliff ? '<span class="bad">Edge detected</span>' : '<span class="ok">Clear</span>';
+    $("#sn-dist").textContent = s.distance_mm == null ? "Nothing close" : (s.distance_mm / 10).toFixed(1) + " cm";
+    if (s.safety_event && Date.now() / 1000 - s.safety_event.at < 3) toast("Stopped: " + s.safety_event.why, true);
+  } catch { $("#sn-charger").textContent = $("#sn-cliff").textContent = $("#sn-dist").textContent = "offline"; }
+}
+function refreshMap() {
+  const img = $("#desk-map"); const n = new Image();
+  n.onload = () => { img.src = n.src; $("#map-msg").style.display = "none"; };
+  n.onerror = () => { $("#map-msg").style.display = "flex"; $("#map-msg").textContent = "Map unavailable while Vector is offline."; };
+  n.src = "/api/map.png?t=" + Date.now();
+}
+function enterDrive() { startCam(); loadSafety(); pollSensors(); refreshMap(); sensorT = setInterval(pollSensors, 1000); mapT = setInterval(refreshMap, 3000); }
+function leaveDrive() { stopDrive(); clearInterval(sensorT); clearInterval(mapT); }
 
 /* ---------------- people ---------------- */
 async function loadFaces() {
@@ -374,8 +408,7 @@ async function providerUI(current) {
   if (current && models.includes(current)) $("#model").value = current;
 }
 segBind("#provider", () => providerUI());
-const STYLE_HELP = { vector: "Playful little robot", jarvis: "Calm British butler with dry wit. Calls you sir.",
-  friday: "Quick, upbeat sidekick. Calls you boss." };
+const STYLE_HELP = { vector: "Playful little robot", jarvis: "Calm, witty and quick. Calls you sir and suggests next steps." };
 function styleHelp() { $("#style-help").textContent = STYLE_HELP[$("#style .on")?.dataset.v || "vector"]; }
 segBind("#style", async v => { styleHelp(); await tryApi("/api/settings", { app: { persona: { style: v } } }, v === "vector" ? "Back to classic Vector" : v.toUpperCase() + " mode on"); });
 $("#brain-save").addEventListener("click", async () => {

@@ -90,6 +90,7 @@
           </div>
           <div class="joy-wrap">
             <div class="joy" id="joy"><div class="knob" id="knob"></div></div>
+            <div class="joy-lock" id="joy-lock">%lock%<span>Driving locked<br>while he charges</span></div>
           </div>
           <div class="vctl">
             <div class="vcol"><div class="vlabel">Head</div><input type="range" class="vslider" id="head" min="-22" max="45" step="1" value="10"><div class="vval" id="head-v">10&deg;</div></div>
@@ -97,6 +98,13 @@
           </div>
         </div>
         <div class="drive-side">
+          <div class="group-title" style="margin-top:0">Safety</div>
+          <div class="group">
+            <div class="row"><div class="rl">Dock lock<small>Stays on the charger until the new battery is in</small></div><div class="rr"><label class="sw"><input type="checkbox" id="dock-lock"><span></span></label></div></div>
+            <div class="row"><div class="rl">On charger</div><div class="rr" id="sn-charger">--</div></div>
+            <div class="row"><div class="rl">Desk edge sensor</div><div class="rr" id="sn-cliff">--</div></div>
+            <div class="row"><div class="rl">Distance ahead</div><div class="rr" id="sn-dist">--</div></div>
+          </div>
           <div class="group">
             <div class="row"><div class="rl">Speed</div>
               <div class="rr"><div class="seg" id="speed"><button data-v="0.45">Slow</button><button data-v="0.75" class="on">Normal</button><button data-v="1">Fast</button></div></div></div>
@@ -113,9 +121,11 @@
             <div><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> or arrows to drive</div>
             <div><kbd>R</kbd>/<kbd>F</kbd> head &nbsp; <kbd>T</kbd>/<kbd>G</kbd> lift &nbsp; <kbd>Space</kbd> stop</div>
           </div>
-          <p class="foot">Vector stops automatically if the app loses contact. Keep him away from table edges while driving.</p>
+          <p class="foot">While driving he stops by himself at the desk edge or when something is closer than 6 cm ahead, and whenever the app loses contact.</p>
         </div>
       </div>
+      <div class="group-title">Desk map <span class="hint">what Vector has mapped: green clear, orange obstacles, red edges</span></div>
+      <div class="map-card"><img id="desk-map" alt=""><div class="cam-msg" id="map-msg">The map fills in as he looks and moves around.</div></div>
     </section>
 
     <!-- ACTIONS -->
@@ -240,7 +250,7 @@
       <div class="group-title">Personality</div>
       <div class="group">
         <div class="row"><div class="rl">Style<small id="style-help">Playful little robot</small></div>
-          <div class="rr"><div class="seg" id="style"><button data-v="vector">Vector</button><button data-v="jarvis">JARVIS</button><button data-v="friday">FRIDAY</button></div></div></div>
+          <div class="rr"><div class="seg" id="style"><button data-v="vector">Vector</button><button data-v="jarvis">JARVIS</button></div></div></div>
       </div>
       <div class="group-title">Who answers when you talk to him</div>
       <div class="group">
@@ -292,6 +302,7 @@
     <section id="general" class="page">
       <h2 class="ptitle">Robot Settings</h2>
       <div class="group">
+        <div class="row"><div class="rl">Dock lock<small>No driving and no leave-the-charger actions; sends him back if he rolls off</small></div><div class="rr"><label class="sw"><input type="checkbox" id="dock-lock2"><span></span></label></div></div>
         <div class="row"><div class="rl">Back button wake word</div><div class="rr"><div class="seg" id="wake"><button data-v="0">Hey Vector</button><button data-v="1">Alexa</button></div></div></div>
         <div class="row"><div class="rl">Temperature</div><div class="rr"><div class="seg" id="temp"><button data-v="f">&deg;F</button><button data-v="c">&deg;C</button></div></div></div>
         <div class="row"><div class="rl">Clock</div><div class="rr"><div class="seg" id="clock"><button data-v="12">12-hour</button><button data-v="24">24-hour</button></div></div></div>

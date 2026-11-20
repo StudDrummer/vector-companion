@@ -33,6 +33,8 @@ if OLLAMA.endswith("/v1"):
 MEMORY_FILE = S.DATA_DIR / "memory.json"
 TODO_FILE = S.DATA_DIR / "todo.json"
 
+DOCK_BLOCKED = S.DOCK_BLOCKED
+
 # actions the UI may call directly on wire-pod (with their allowed params)
 WP_ALLOWED = {
     "volume": ["volume"], "eye_color": ["color"], "custom_eye_color": ["hue", "sat"],
@@ -361,7 +363,9 @@ class Handler(BaseHTTPRequestHandler):
                 data = _get(url, 15)
                 return self._send(200, data, "image/jpeg")
             if path == "/api/camera_url":
-                return self._json({"url": f"{WIREPOD}/cam-stream?serial={ROBOT.v.serial}"})
+                return self._json({"url": "/api/cam?x=1"})
+            if path == "/api/cam":
+                return self._proxy_cam()
             if path == "/api/settings":
                 return self._json({"app": S.load(), "brain": brain_settings(),
                                    "ollama_models": ollama_models(),
@@ -375,6 +379,10 @@ class Handler(BaseHTTPRequestHandler):
                     return self._json(cc.call("/health", timeout=2))
                 except Exception as e:  # noqa: BLE001
                     return self._json({"connected": False, "running": False, "error": str(e)})
+            if path == "/api/sensors":
+                return self._json(cc.call("/sensors", timeout=3))
+            if path == "/api/map.png":
+                return self._send(200, cc.call("/map.png", timeout=8), "image/png")
             if path == "/api/companion_anims":
                 return self._json(cc.call("/anims", timeout=5))
             if path == "/api/scans":
@@ -400,20 +408,36 @@ class Handler(BaseHTTPRequestHandler):
                     return self._json({"error": "not allowed"}, 403)
                 params = {k: b[k] for k in WP_ALLOWED[action] if k in b}
                 if action == "cloud_intent":
-                    params["intent"] = INTENTS.get(params.get("intent", ""), params.get("intent", ""))
+                    name = params.get("intent", "")
+                    if S.load()["safety"]["dock_lock"] and name in DOCK_BLOCKED:
+                        return self._json({"ok": False, "error": "That makes him leave the charger. "
+                                           "It's blocked while the dock lock is on (Robot Settings)."}, 423)
+                    params["intent"] = INTENTS.get(name, name)
                 return self._json({"ok": True, "result": ROBOT.wp(action, **params)})
             if path == "/api/say":
                 text = str(b.get("text", "")).strip()[:400]
-                with ROBOT.lock:
-                    ROBOT.take_control()
-                    ROBOT.wp("say_text", text=text)
-                    ROBOT.last_cmd = time.time()
+                try:  # one channel: the companion owns behavior control
+                    cc.call("/say", {"text": text}, timeout=60)
+                except Exception:  # noqa: BLE001
+                    with ROBOT.lock:
+                        ROBOT.take_control()
+                        ROBOT.wp("say_text", text=text)
+                        ROBOT.last_cmd = time.time()
                 return self._json({"ok": True})
             if path == "/api/move":
-                ROBOT.move(lw=_f(b, "lw", -220, 220), rw=_f(b, "rw", -220, 220),
-                           head=_f(b, "head", -3, 3), lift=_f(b, "lift", -3, 3))
+                lw, rw = _f(b, "lw", -220, 220) or 0, _f(b, "rw", -220, 220) or 0
+                if S.load()["safety"]["dock_lock"] and (lw or rw):
+                    return self._json({"ok": False, "error": "Dock lock is on: driving is off until his new battery is in."}, 423)
+                try:  # companion drives with cliff + obstacle protection
+                    cc.call("/drive", {"lw": lw, "rw": rw}, timeout=3)
+                except Exception:  # noqa: BLE001
+                    ROBOT.move(lw=lw, rw=rw)
                 return self._json({"ok": True})
             if path == "/api/stop":
+                try:
+                    cc.call("/stop", {}, timeout=3)
+                except Exception:  # noqa: BLE001
+                    pass
                 ROBOT.stop()
                 return self._json({"ok": True})
             if path == "/api/release":
@@ -423,9 +447,10 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json({"ok": True})
             if path.startswith("/api/companion/"):
                 sub = path[len("/api/companion"):]
-                if sub not in ("/face", "/head", "/lift", "/anim", "/scan", "/focus", "/greet_test", "/say"):
+                if sub not in ("/face", "/head", "/lift", "/anim", "/scan", "/focus", "/greet_test", "/say",
+                               "/dock", "/reconnect", "/stop"):
                     return self._json({"error": "not allowed"}, 403)
-                r = cc.call(sub, b, timeout=180 if sub == "/scan" else 20)
+                r = cc.call(sub, b, timeout=180 if sub == "/scan" else 60)
                 return self._json(r, 200 if (not isinstance(r, dict) or r.get("ok", True)) else 503)
             if path == "/api/settings":
                 return self._json({"app": S.save(b.get("app", {})),
@@ -452,6 +477,25 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({"error": "not found"}, 404)
         except Exception as e:  # noqa: BLE001
             return self._err(e)
+
+    def _proxy_cam(self):
+        """Relay wire-pod's MJPEG camera stream (the browser can't load it cross-origin)."""
+        up = urllib.request.urlopen(f"{WIREPOD}/cam-stream?serial={ROBOT.v.serial}", timeout=10)
+        try:
+            self.send_response(200)
+            self.send_header("Content-Type", up.headers.get("Content-Type", "multipart/x-mixed-replace; boundary=--boundary"))
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            while True:
+                chunk = up.read(16384)
+                if not chunk:
+                    break
+                self.wfile.write(chunk)
+                self.wfile.flush()
+        except (BrokenPipeError, ConnectionResetError, OSError):
+            pass  # viewer left: closing upstream stops wire-pod's stream
+        finally:
+            up.close()
 
     def _static(self, rel: str):
         p = (STATIC / rel).resolve()

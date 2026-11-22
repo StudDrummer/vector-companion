@@ -229,3 +229,16 @@ kbd{display:inline-block;min-width:20px;padding:0 5px;border-radius:5px;backgrou
 .bj{display:none}.bj.on{display:block}
 .tile .lockn{display:flex;align-items:center;gap:3px;font-size:10px;color:var(--txt3);margin-top:2px}
 .tile .lockn svg{width:10px;height:10px}
+
+.today{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:18px}
+.tcard{background:var(--cell);border-radius:12px;padding:12px 14px;display:flex;flex-direction:column;gap:2px;min-width:0}
+.tcard .tl{font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--txt3)}
+.tcard b{font-size:20px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tcard small{color:var(--txt2);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+@media (max-width:820px){.today{grid-template-columns:repeat(2,1fr)}}
+.photos .ph{margin:0;cursor:default}
+.photos .ph img{display:block}
+.photos .ph figcaption{font-size:11px;color:var(--txt2);margin-top:4px}
+
+.quick{grid-template-columns:repeat(6,1fr)!important}
+@media (max-width:900px){.quick{grid-template-columns:repeat(3,1fr)!important}}

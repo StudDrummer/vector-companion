@@ -44,7 +44,7 @@ async function api(path, body, raw) {
     : { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) };
   const r = await fetch(path, opt);
   const j = await r.json().catch(() => ({}));
-  if (!r.ok || j.ok === false) throw new Error(j.error || r.statusText);
+  if (!r.ok || (j && j.ok === false)) throw new Error((j && j.error) || r.statusText);
   return j;
 }
 let toastT;
@@ -64,7 +64,7 @@ const intent = (name, label) => tryApi("/api/do", { action: name }, label || "Se
 const say = text => text.trim() && tryApi("/api/say", { text }, "Speaking");
 
 /* ---------------- navigation ---------------- */
-const hooks = { drive: [enterDrive, leaveDrive], scan: [startScan, stopScanCam], personality: [loadPersonality], people: [loadFaces], photos: [loadPhotos], brain: [loadBrain],
+const hooks = { overview: [loadToday], drive: [enterDrive, leaveDrive], scan: [startScan, stopScanCam], personality: [loadPersonality], people: [loadFaces], photos: [loadPhotos], brain: [loadBrain],
   notify: [loadNotify], about: [loadAbout], jarvis: [loadJarvis], guard: [loadGuard], actions: [loadStudy], eyes: [loadRobotSettings], general: [loadRobotSettings], voice: [loadRobotSettings] };
 let current = null;
 function go(id) {
@@ -87,8 +87,10 @@ let ST = {}, RS = {};
 function battInfo(b) {
   if (!b || b.battery_level === undefined) return null;
   const lvl = b.battery_level, words = ["Very low", "Low", "Good", "Full"];
-  return { pct: [0.12, 0.33, 0.66, 1][lvl] ?? 0.5, word: words[lvl] ?? "--", charging: b.is_charging,
-    onCharger: b.is_on_charger_platform };
+  // a worn-out battery reads "full" on the charger but sits around 3.5 V; say what's really going on
+  const worn = b.battery_volts && b.battery_volts < 3.65 && b.is_on_charger_platform;
+  return { pct: worn ? 0.08 : ([0.12, 0.33, 0.66, 1][lvl] ?? 0.5), word: worn ? "Replace" : (words[lvl] ?? "--"),
+    charging: !worn && b.is_charging, onCharger: b.is_on_charger_platform, worn };
 }
 async function refreshStatus() {
   try { ST = await api("/api/status"); } catch { ST = {}; }
@@ -162,7 +164,7 @@ $("#custom-on").addEventListener("change", e => {
 $("#volume").addEventListener("change", e => wp("volume", { volume: e.target.value }, "Volume set"));
 $("#vo-say-btn").addEventListener("click", () => say($("#vo-say").value));
 $("#vo-say").addEventListener("keydown", e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); say(e.target.value); } });
-$("#vo-listen").addEventListener("click", () => wp("trigger_wake_word", {}, "Vector is listening"));
+$("#vo-listen").addEventListener("click", () => go("jarvis"));
 const CHIPS = ["Hello!", "Good morning.", "Time to study.", "Great job!", "I'll be right back.", "Who's there?", "Beep boop."];
 $("#chips").innerHTML = CHIPS.map(c => `<button class="chip">${esc(c)}</button>`).join("");
 $$(".chip").forEach(c => c.addEventListener("click", () => say(c.textContent)));
@@ -213,6 +215,20 @@ $("#bj-hit").addEventListener("click", () => intent("bj_hit", "Hit"));
 $("#bj-stand").addEventListener("click", () => intent("bj_stand", "Stand"));
 $$("[data-intent]").forEach(b => b.addEventListener("click", () => intent(b.dataset.intent, b.textContent.trim())));
 $("#qa-listen").addEventListener("click", () => go("jarvis"));
+$("#qa-study").addEventListener("click", () => tryApi("/api/companion/focus", { minutes: 25 }, "25 minute study session started"));
+$("#qa-quiz").addEventListener("click", () => { go("actions"); setTimeout(() => $("#quiz-topic").focus(), 200); });
+$("#qa-status").addEventListener("click", () => intent("status", "Status report"));
+async function loadToday() {
+  let t = {}; try { t = await api("/api/today"); } catch { return; }
+  $("#t-weather").textContent = t.weather ? t.weather.now : "--";
+  $("#t-weather2").textContent = t.weather ? t.weather.range : "";
+  $("#t-study").textContent = t.study ? `${t.study} min` : "0 min";
+  $("#t-focus").textContent = t.focus ? `Timer: ${Math.ceil(t.focus.left_s / 60)} min left` : (t.study ? "Nice work" : "Not started yet");
+  $("#t-todo").textContent = String(t.todo.length);
+  $("#t-todo2").textContent = t.todo[0] ? t.todo[0] : "List is clear";
+  $("#t-next").textContent = t.next[0] ? t.next[0].split(":")[0] : "Nothing";
+  $("#t-next2").textContent = t.next[0] ? (t.next[0].split(":").slice(1).join(":").trim() || "") : "No reminders soon";
+}
 $("#ov-say").addEventListener("keydown", e => { if (e.key === "Enter") { say(e.target.value); e.target.value = ""; } });
 $("#dr-say").addEventListener("keydown", e => { if (e.key === "Enter") { say(e.target.value); e.target.value = ""; } });
 
@@ -336,7 +352,7 @@ async function loadFaces() {
   const box = $("#faces");
   let list;
   try { list = await api("/api/faces"); } catch (e) { box.innerHTML = `<div class="empty">${esc(friendly(e.message))}</div>`; return; }
-  if (!Array.isArray(list)) list = list.faces || [];
+  if (!Array.isArray(list)) list = (list && list.faces) || [];
   if (!list.length) { box.innerHTML = `<div class="empty">No faces yet. Teach him one below.</div>`; return; }
   box.innerHTML = list.map(f => {
     const id = f.face_id ?? f.faceId ?? f.id, name = f.name || "Unknown";
@@ -370,21 +386,29 @@ $("#face-add").addEventListener("click", async () => {
 let lbId = null;
 async function loadPhotos() {
   const g = $("#photo-grid");
-  let ids;
-  try { ids = await api("/api/photos"); } catch (e) { g.innerHTML = `<div class="empty">${esc(friendly(e.message))}</div>`; return; }
-  if (!Array.isArray(ids) || !ids.length) { g.innerHTML = `<div class="empty">No photos yet.</div>`; return; }
-  g.innerHTML = ids.slice().reverse().map(id => `<img data-id="${id}" src="/api/photo?thumb=1&id=${id}" loading="lazy" alt="">`).join("");
-  $$("#photo-grid img").forEach(i => i.addEventListener("click", () => {
-    lbId = i.dataset.id; $("#lb-img").src = "/api/photo?id=" + lbId; $("#lightbox").classList.add("on");
+  let d;
+  try { d = await api("/api/photos"); } catch (e) { g.innerHTML = `<div class="empty">${esc(friendly(e.message))}</div>`; return; }
+  const mac = (d && d.mac) || [], robot = (d && d.robot) || [];
+  if (!mac.length && !robot.length) { g.innerHTML = `<div class="empty">No photos yet. Say "Hey Jarvis, take a photo".</div>`; return; }
+  g.innerHTML = mac.map(p => `<figure class="ph" data-mac="${esc(p.name)}"><img src="/api/mac_photo/${encodeURIComponent(p.name)}" loading="lazy" alt="">` +
+      `<figcaption>${p.kind === "guard" ? "Desk guard · " : ""}${new Date(p.at * 1000).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}</figcaption></figure>`).join("") +
+    robot.slice().reverse().map(id => `<figure class="ph" data-id="${id}"><img src="/api/photo?thumb=1&id=${id}" loading="lazy" alt=""><figcaption>On Vector</figcaption></figure>`).join("");
+  $$("#photo-grid .ph").forEach(f => f.addEventListener("click", () => {
+    lbId = f.dataset.id || null; lbMac = f.dataset.mac || null;
+    $("#lb-img").src = lbMac ? "/api/mac_photo/" + encodeURIComponent(lbMac) : "/api/photo?id=" + lbId;
+    $("#lightbox").classList.add("on");
   }));
 }
+let lbMac = null;
 $("#ph-refresh").addEventListener("click", loadPhotos);
 $("#lb-close").addEventListener("click", () => $("#lightbox").classList.remove("on"));
 $("#lightbox").addEventListener("click", e => { if (e.target.id === "lightbox") $("#lightbox").classList.remove("on"); });
 $("#lb-del").addEventListener("click", async e => {
   const b = e.currentTarget;
   if (!b.dataset.armed) { b.dataset.armed = 1; b.textContent = "Delete forever?"; setTimeout(() => { delete b.dataset.armed; b.textContent = "Delete"; }, 2500); return; }
-  await wp("delete_image", { id: lbId }, "Deleted"); $("#lightbox").classList.remove("on"); loadPhotos();
+  if (lbMac) await tryApi("/api/mac_photo_delete", { name: lbMac }, "Deleted");
+  else await wp("delete_image", { id: lbId }, "Deleted");
+  $("#lightbox").classList.remove("on"); loadPhotos();
 });
 
 /* ---------------- brain & memory ---------------- */
@@ -477,7 +501,7 @@ const saveNotify = debounce(async () => {
 $$("#notify input").forEach(i => i.addEventListener("change", saveNotify));
 $("#test-notify").addEventListener("click", async () => { await tryApi("/api/test_notify", {}, "Vector should speak in a moment"); setTimeout(loadHookLog, 6000); });
 async function loadHookLog() {
-  try { const l = await api("/api/logs"); $("#hooklog").textContent = l.hook.slice().reverse().join("\n") || "No announcements yet."; } catch { }
+  try { const l = await api("/api/logs"); $("#hooklog").textContent = l.hook.filter(x => /^\d{4}-\d\d-\d\d /.test(x)).reverse().join("\n") || "No announcements yet."; } catch { }
 }
 
 /* ---------------- diagnostics ---------------- */
@@ -493,10 +517,11 @@ async function loadAbout() {
   try {
     let s = await api("/api/stats"); if (s.raw) s = JSON.parse(s.raw);
     const flat = {}; (function f(o, p) { for (const [k, v] of Object.entries(o || {})) typeof v === "object" ? f(v, p + k + ".") : flat[p + k] = v; })(s, "");
-    const LABELS = { "Alive.seconds": "Time alive", "Alive.distance_cm": "Distance driven", "BStat.PetMinutes": "Minutes petted",
-      "Stim.CumlPosDelta": "Happy moments", "Alive.num_wake_word": "Times called" };
+    const LABELS = { "Alive.seconds": "Time awake (lifetime)", "BStat.ReactedToTriggerWord": 'Times he answered "Hey Vector"',
+      "Pet.ms": "Time petted", "Stim.CumlPosDelta": "Happiness points", "BStat.PetMinutes": "Minutes petted" };
+    for (const k of Object.keys(flat)) if (!(k in LABELS)) delete flat[k];  // hide raw internal counters
     const nice = k => LABELS[k] || k.replace(/^(Alive|BStat|Stim|FeatureType|Feature)\./, "").replace(/([a-z])([A-Z])/g, "$1 $2").replace(/[._]/g, " ").replace(/^\w/, c => c.toUpperCase());
-    const fmt = (k, v) => /seconds?$|Sec$/i.test(k) ? (v / 3600).toFixed(1) + " h" : /cm$/i.test(k) ? (v / 100).toFixed(1) + " m" : String(v);
+    const fmt = (k, v) => /seconds?$|Sec$/i.test(k) ? (v / 3600).toFixed(1) + " hours" : /\.ms$/.test(k) ? (v / 60000).toFixed(1) + " minutes" : Number(v).toLocaleString();
     const items = Object.entries(flat).filter(([, v]) => typeof v === "number" && v > 0).slice(0, 12);
     $("#stats").innerHTML = items.length ? items.map(([k, v]) => `<div class="row"><div class="rl">${esc(nice(k))}</div><div class="rr">${esc(fmt(k, v))}</div></div>`).join("") : `<div class="empty">No stats available.</div>`;
   } catch { $("#stats").innerHTML = `<div class="empty">No stats available.</div>`; }
@@ -507,7 +532,7 @@ async function loadAbout() {
       ["Voice", n.voice === "mac" ? "JARVIS voice (Mac)" : "His own voice"], ["Cube", n.cube ? "Connected" : "Not connected"]];
     $("#net-rows").innerHTML = rows.map(([k, v]) => `<div class="row"><div class="rl">${k}</div><div class="rr wrap-text">${esc(v)}</div></div>`).join("");
   } catch { $("#net-rows").innerHTML = `<div class="empty">The companion isn't running.</div>`; }
-  try { const l = await api("/api/logs"); $("#brainlog").textContent = l.brain.slice(-30).join("\n") || "Empty."; } catch { }
+  try { const l = await api("/api/logs"); $("#brainlog").textContent = l.brain.filter(x => !/GET \/health/.test(x) && x.trim() !== "[brain]").slice(-30).join("\n") || "Nothing yet."; } catch { }
 }
 $("#brain-restart").addEventListener("click", () => tryApi("/api/brain/restart", {}, "Brain restarted"));
 $("#release").addEventListener("click", () => tryApi("/api/release", {}, "Vector is free"));
@@ -600,10 +625,10 @@ $("#face-text").addEventListener("keydown", e => { if (e.key === "Enter" && e.ta
 $("#brief-test").addEventListener("click", async () => {
   const r = await tryApi("/api/companion/greet_test", {}); if (r) { toast("Briefing: " + r.text.slice(0, 80) + "..."); tryApi("/api/companion/say", { text: r.text }); }
 });
-const pretty = t => t.replace(/([a-z])([A-Z])/g, "$1 $2");
+const pretty = t => t.replace(/_/g, " ").replace(/([a-z])([A-Z])/g, "$1 $2").replace(/\bRtp\b/g, "").replace(/\s+/g, " ").trim();
 function renderAnims() {
   const q = $("#anim-q").value.toLowerCase().replace(/\s+/g, "");
-  const list = ANIMS.filter(a => a.toLowerCase().includes(q)).slice(0, 300);
+  const list = ANIMS.filter(a => !/^Invalid|^Already|Test|Debug|^Dev/.test(a) && a.toLowerCase().replace(/_/g, "").includes(q)).slice(0, 300);
   $("#anim-count").textContent = ANIMS.length ? `${ANIMS.length} built in` : "(connect Vector to load)";
   $("#anim-list").innerHTML = list.map(a => `<button data-a="${esc(a)}" title="${esc(a)}">${esc(pretty(a))}</button>`).join("");
   $$("#anim-list button").forEach(b => b.addEventListener("click", () => tryApi("/api/companion/anim", { name: b.dataset.a }, "Playing")));
@@ -642,6 +667,8 @@ async function loadJarvis() {
   await loadK("#jarvis");
   if (!$("#voices").options.length) {
     let v = []; try { v = await api("/api/voices"); } catch { }
+    const NOVELTY = /^(Albert|Bad News|Bahh|Bells|Boing|Bubbles|Cellos|Good News|Jester|Junior|Organ|Ralph|Superstar|Trinoids|Whisper|Wobble|Zarvox|Fred|Kathy|Grandma|Grandpa|Rocko)\b/;
+    v = v.filter(n => !NOVELTY.test(n));
     const cur = kget("voice.mac_voice") || "Daniel";
     if (!v.includes(cur)) v.unshift(cur);
     $("#voices").innerHTML = v.map(n => `<option${n === cur ? " selected" : ""}>${esc(n)}</option>`).join("");
@@ -675,6 +702,7 @@ async function loadGuard() {
   $("#guard-events").innerHTML = ev.length ? ev.map(e => `<img src="/api/guard_photo/${encodeURIComponent(e.photo)}" title="${new Date(e.at * 1000).toLocaleTimeString()}">`).join("")
     : `<div class="empty">${g.on ? "Nothing yet. All quiet." : "Turn on desk guard or say \"Hey Jarvis, guard my desk\"."}</div>`;
   $("#cube-state").innerHTML = h.cube ? '<span class="ok">Connected</span>' : '<span class="mute">Not connected</span>';
+  $("#cube-sub").textContent = h.cube ? "Tap it to try" : "Put it near him and press Connect. Needs an N battery (E90 / LR1).";
 }
 $("#guard-on").addEventListener("change", async e => {
   await tryApi("/api/companion/guard", { on: e.target.checked, report: false }, e.target.checked ? "Desk guard on" : "Desk guard off"); loadGuard();
@@ -688,3 +716,4 @@ go("overview");
 refreshStatus(); loadRobotSettings();
 setInterval(refreshStatus, 6000);
 setInterval(() => { if (current === "notify") loadHookLog(); }, 5000);
+setInterval(() => { if (current === "overview") loadToday(); }, 30000);

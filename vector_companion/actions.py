@@ -40,7 +40,7 @@ CATALOG = {
     "trick": "Do a trick", "love": "I love you", "praise": "Good robot", "scold": "Bad robot",
     "hello": "Say hi", "goodbye": "Goodbye", "time": "What time is it", "age": "How old are you",
     "name": "What's my name", "sleep": "Go to sleep", "go_to_charger": "Go home", "take_photo": "Take a photo",
-    "volume_up": "Louder", "volume_down": "Quieter", "be_quiet": "Be quiet",
+    "volume_up": "Louder", "volume_down": "Quieter", "be_quiet": "Be quiet", "status": "Status report",
 }
 DRIVES = {"dance", "explore", "come_here", "look_at_me", "fetch_cube", "roll_cube", "pop_a_wheelie"}
 
@@ -139,6 +139,10 @@ class Actions:
             self.say("Louder." if new > cur else "Quieter." if new < cur else "That's as far as it goes.")
             return {"volume": new}
         if a == "be_quiet":
+            return {}
+        if a == "status":
+            from .brain import status_report
+            self.say(status_report())
             return {}
         raise ValueError(f"unknown action {action!r}")
 

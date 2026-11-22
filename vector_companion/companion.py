@@ -295,6 +295,7 @@ class Companion:
     def pause_still(self, seconds: float) -> None:
         """Release the hold so a built-in behavior can run; it comes back by itself afterwards."""
         self.still_paused_until = max(self.still_paused_until, time.time() + max(5.0, min(float(seconds), 900)))
+        self.release_now()  # his own behavior (learning a face, a game) needs his body too
         if self.reserve is not None:
             rc, self.reserve = self.reserve, None
             try:
@@ -379,6 +380,19 @@ class Companion:
         except Exception:  # noqa: BLE001
             return self.ctl_held
 
+    def release_now(self):
+        """Hand his body back immediately instead of after the idle timeout."""
+        if not self.ctl_held or not self.lock.acquire(timeout=2):
+            return
+        try:
+            if self.connected:
+                self.robot.conn.release_control(timeout=4)
+        except Exception:  # noqa: BLE001
+            pass
+        finally:
+            self.ctl_held = False
+            self.lock.release()
+
     def _release_loop(self):
         while True:
             time.sleep(1)
@@ -448,6 +462,16 @@ class Companion:
         if eng == "mac" and (not shutil.which("say") or time.time() < self.audio_broken_until):
             eng = "robot"
         return eng
+
+    def play_wav(self, path: str):
+        """Play a sound file through his speaker (16 kHz mono WAV)."""
+        with wave.open(path, "rb") as w:
+            secs = w.getnframes() / float(w.getframerate())
+        vol = max(0, min(100, int(S.load()["voice"].get("volume") or 80)))
+        with self.control() as r:
+            raw = self.raw
+            self.speaking_until = time.time() + secs + 1
+            self.call(lambda: raw.audio.stream_wav_file(path, vol), secs + 15, "play_sound")
 
     def _mac_wav(self, text: str) -> tuple[str, float]:
         v = S.load()["voice"]
@@ -1061,6 +1085,9 @@ class Companion:
             name = (getattr(event, "name", "") or "").strip()
         except Exception:  # noqa: BLE001
             return
+        if time.time() < self.still_paused_until and not (self.actions.bj and self.actions.bj.active) \
+                and not (self.quiz and self.quiz.active):
+            return  # one of his own behaviors is running (e.g. learning a face): don't talk over it
         self._presence()
         if self.guard and name.lower() == OWNER.lower():
             self.last_greet[name] = time.time()
@@ -1275,6 +1302,9 @@ class Handler(BaseHTTPRequestHandler):
                     threading.Thread(target=COMP._connect_cube, daemon=True).start()
                 else:
                     COMP.cube_color(b.get("color"), float(b.get("seconds", 3)))
+            elif u.path == "/play":
+                path = str(b.get("path", ""))
+                threading.Thread(target=lambda: _safe(COMP.play_wav, path), daemon=True).start()
             elif u.path == "/quiz":
                 from .quiz import Quiz
                 COMP.quiz = Quiz(COMP, str(b.get("topic", "")))

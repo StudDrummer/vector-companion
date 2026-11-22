@@ -60,12 +60,20 @@
           <div class="pill"><span class="pl">Network</span><span id="pill-ip">--</span></div>
         </div>
       </div>
+      <div class="group-title">Today</div>
+      <div class="today" id="today">
+        <div class="tcard"><span class="tl">Weather</span><b id="t-weather">--</b><small id="t-weather2"></small></div>
+        <div class="tcard"><span class="tl">Studied</span><b id="t-study">--</b><small id="t-focus"></small></div>
+        <div class="tcard"><span class="tl">To-do</span><b id="t-todo">--</b><small id="t-todo2"></small></div>
+        <div class="tcard"><span class="tl">Coming up</span><b id="t-next">--</b><small id="t-next2"></small></div>
+      </div>
       <div class="group-title">Quick actions</div>
       <div class="quick">
-        <button class="qa" data-intent="dance"><i>%music%</i>Dance</button>
-        <button class="qa" data-intent="explore"><i>%compass%</i>Explore</button>
-        <button class="qa" data-intent="come_here"><i>%arrowdown%</i>Come here</button>
-        <button class="qa" data-intent="go_to_charger"><i>%bolt%</i>Go home</button>
+        <button class="qa" id="qa-study"><i>%doc%</i>Study 25 min</button>
+        <button class="qa" id="qa-quiz"><i>%spark%</i>Quiz me</button>
+        <button class="qa" data-intent="blackjack"><i>%cards%</i>Blackjack</button>
+        <button class="qa" data-intent="fist_bump"><i>%bolt%</i>Fist bump</button>
+        <button class="qa" id="qa-status"><i>%info%</i>Status report</button>
         <button class="qa" id="qa-listen"><i>%mic%</i>Hey Jarvis</button>
       </div>
       <div class="group">
@@ -159,7 +167,7 @@
             <div class="row"><div class="rr grow"><input id="scan-q" class="field" style="text-align:left" placeholder="Optional question, e.g. why is my answer to 3 wrong?"></div></div>
           </div>
           <button class="btn primary big" id="scan-go">%camera% Scan now</button>
-          <p class="foot">Or say: "Hey Vector... I have a question... check my homework".</p>
+          <p class="foot">Or just say: "Hey Jarvis, check my homework" (or "solve this", "read this", "what am I holding").</p>
         </div>
       </div>
       <div class="result" id="scan-result" hidden>
@@ -258,7 +266,7 @@
       <div class="group-title">Cube button</div>
       <div class="group">
         <div class="row"><div class="rl">Use the cube as a desk button<small>Tap once: start or stop a focus timer (lights go green, yellow, red). Tap twice: status report.</small></div><div class="rr"><label class="sw"><input type="checkbox" data-k="companion.cube_button"><span></span></label></div></div>
-        <div class="row"><div class="rl">Cube<small id="cube-sub">Needs a fresh N battery (E90 / LR1)</small></div><div class="rr"><span id="cube-state" class="mute">--</span> <button class="btn small" id="cube-connect">Connect</button> <button class="btn small" id="cube-light">Light up</button></div></div>
+        <div class="row"><div class="rl">Cube<small id="cube-sub"></small></div><div class="rr"><span id="cube-state" class="mute">--</span> <button class="btn small" id="cube-connect">Connect</button> <button class="btn small" id="cube-light">Light up</button></div></div>
       </div>
     </section>
 
@@ -273,7 +281,7 @@
       <div class="group">
         <div class="row"><div class="rl">Volume</div>
           <div class="rr grow"><span class="mini">%speakeroff%</span><input type="range" id="volume" min="0" max="5" step="1" class="slider"><span class="mini">%speaker%</span></div></div>
-        <div class="row"><div class="rl">Start listening</div><div class="rr"><button class="btn" id="vo-listen">Hey Vector</button></div></div>
+        <div class="row"><div class="rl">Talk to him<small>"Hey Jarvis" through your Mac, or "Hey Vector" to him directly</small></div><div class="rr"><button class="btn" id="vo-listen">Hey Jarvis settings</button></div></div>
       </div>
       <div class="group-title">Play a sound</div>
       <div class="group">
@@ -311,7 +319,7 @@
     <!-- PHOTOS -->
     <section id="photos" class="page">
       <h2 class="ptitle">Photos <button class="btn small" id="ph-refresh">Refresh</button></h2>
-      <p class="lead">Pictures Vector has taken. Say "Hey Vector, take a photo" or use the Take photo button in Drive.</p>
+      <p class="lead">Pictures Vector has taken. Say "Hey Jarvis, take a photo" or use Take photo in Actions. They're also saved in your Pictures folder, under Vector.</p>
       <div class="photos" id="photo-grid"></div>
     </section>
 
@@ -336,9 +344,9 @@
       <div class="group"><div class="row col"><textarea id="about-me" class="field area" rows="5" placeholder="Classes, interests, how you like things explained"></textarea></div></div>
       <p class="foot">Keys stay on this Mac in the project's .env file. The homework scanner uses whichever key you've saved (Claude first), or a local vision model.</p>
       <div class="btn-row"><button class="btn primary" id="brain-save">Save and restart brain</button><span class="saved" id="brain-saved"></span></div>
-      <div class="group-title">Things he remembers <span class="hint">"I have a question... remember that ..."</span></div>
+      <div class="group-title">Things he remembers <span class="hint">"Hey Jarvis, remember that ..."</span></div>
       <div class="group" id="mem"></div>
-      <div class="group-title">To-do list <span class="hint">"I have a question... add ... to my list"</span></div>
+      <div class="group-title">To-do list <span class="hint">"Hey Jarvis, add ... to my list"</span></div>
       <div class="group" id="todo"></div>
       <div class="group"><div class="row"><div class="rr grow"><input id="todo-new" class="field" placeholder="Add a to-do and press Return"></div></div></div>
     </section>

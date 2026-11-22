@@ -269,6 +269,62 @@ def restart_brain(service: str = "brain") -> bool:
         return False
 
 
+PHOTO_DIRS = (Path.home() / "Pictures" / "Vector", S.DATA_DIR / "guard")
+
+
+def mac_photos() -> list[dict]:
+    out = []
+    for d in PHOTO_DIRS:
+        if d.exists():
+            for f in d.glob("*.jpg"):
+                out.append({"name": f"{d.name}/{f.name}", "at": f.stat().st_mtime,
+                            "kind": "guard" if d.name == "guard" else "photo"})
+    return sorted(out, key=lambda x: -x["at"])[:120]
+
+
+def _mac_photo_path(name: str) -> Path:
+    folder, _, fname = name.partition("/")
+    for d in PHOTO_DIRS:
+        if d.name == folder and fname and "/" not in fname and not fname.startswith("."):
+            f = d / fname
+            if f.exists():
+                return f
+    raise FileNotFoundError(name)
+
+
+_weather_cache: dict = {}
+
+
+def today() -> dict:
+    from ..brain import TODO_FILE, _reminders
+    from ..companion import study_today
+    out = {"study": study_today(), "todo": _load_json(TODO_FILE, []), "next": [], "weather": None, "focus": None}
+    try:
+        out["next"] = _reminders(3)
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        out["focus"] = cc.call("/health", timeout=2).get("focus")
+    except Exception:  # noqa: BLE001
+        pass
+    if S.load()["weather"].get("enabled", True):
+        hit = _weather_cache.get("w")
+        if hit and time.time() - hit[0] < 1200:
+            out["weather"] = hit[1]
+        else:
+            try:
+                from .. import weather
+                d = weather.forecast()
+                cur, dl = d["current"], d["daily"]
+                w = {"now": f"{round(cur['temperature_2m'])}° {weather.CODES.get(cur['weather_code'], '')}".strip(),
+                     "range": f"High {round(dl['temperature_2m_max'][0])}° · Low {round(dl['temperature_2m_min'][0])}°"}
+                _weather_cache["w"] = (time.time(), w)
+                out["weather"] = w
+            except Exception:  # noqa: BLE001
+                pass
+    return out
+
+
 def ears_status() -> dict:
     try:
         st = json.loads((S.DATA_DIR / "ears.json").read_text())
@@ -327,9 +383,9 @@ def convert_sound(raw: bytes, suffix: str) -> bytes:
         src, dst = Path(d) / f"in{suffix}", Path(d) / "out.wav"
         src.write_bytes(raw)
         if shutil.which("afconvert"):
-            cmd = ["afconvert", "-f", "WAVE", "-d", "LEI16@8000", "-c", "1", str(src), str(dst)]
+            cmd = ["afconvert", "-f", "WAVE", "-d", "LEI16@16000", "-c", "1", str(src), str(dst)]
         elif shutil.which("ffmpeg"):
-            cmd = ["ffmpeg", "-y", "-loglevel", "error", "-i", str(src), "-ar", "8000", "-ac", "1",
+            cmd = ["ffmpeg", "-y", "-loglevel", "error", "-i", str(src), "-ar", "16000", "-ac", "1",
                    "-sample_fmt", "s16", str(dst)]
         else:
             raise RuntimeError("no audio converter found")
@@ -402,7 +458,16 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/faces":
                 return self._json(_json_or_text(ROBOT.wp("get_faces", method="GET")))
             if path == "/api/photos":
-                return self._json(_json_or_text(ROBOT.wp("get_image_ids", method="GET")))
+                try:
+                    robot = _json_or_text(ROBOT.wp("get_image_ids", method="GET")) or []
+                except Exception:  # noqa: BLE001
+                    robot = []
+                return self._json({"mac": mac_photos(), "robot": robot if isinstance(robot, list) else []})
+            if path.startswith("/api/mac_photo/"):
+                f = _mac_photo_path(urllib.parse.unquote(path[len("/api/mac_photo/"):]))
+                return self._send(200, f.read_bytes(), "image/jpeg")
+            if path == "/api/today":
+                return self._json(today())
             if path == "/api/photo":
                 action = "get_image_thumb" if q.get("thumb") else "get_image"
                 url = f"{WIREPOD}/api-sdk/{action}?serial={ROBOT.v.serial}&id={urllib.parse.quote(q.get('id', ''))}"
@@ -543,7 +608,15 @@ class Handler(BaseHTTPRequestHandler):
                 data = b.get("_raw", b"")
                 name = self.headers.get("X-Filename", "sound.wav")
                 wav = convert_sound(data, Path(name).suffix or ".wav")
-                threading.Thread(target=play_sound, args=(wav,), daemon=True).start()
+                tmp = Path(tempfile.gettempdir()) / f"vector-sound-{int(time.time())}.wav"
+                tmp.write_bytes(wav)
+                try:  # the companion owns his speaker; WirePod's player fights it for control
+                    cc.call("/play", {"path": str(tmp)}, timeout=5)
+                except Exception:  # noqa: BLE001
+                    threading.Thread(target=play_sound, args=(wav,), daemon=True).start()
+                return self._json({"ok": True})
+            if path == "/api/mac_photo_delete":
+                _mac_photo_path(str(b.get("name", ""))).unlink()
                 return self._json({"ok": True})
             return self._json({"error": "not found"}, 404)
         except Exception as e:  # noqa: BLE001

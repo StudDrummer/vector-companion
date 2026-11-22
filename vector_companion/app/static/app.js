@@ -60,7 +60,7 @@ const friendly = m => /no robot|unreach|refused|timed out|URLError/i.test(m) ? "
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 const debounce = (fn, ms) => { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; };
 const wp = (action, params, msg) => tryApi("/api/wp/" + action, params || {}, msg);
-const intent = (name, label) => wp("cloud_intent", { intent: name }, label || "Sent to Vector");
+const intent = (name, label) => tryApi("/api/do", { action: name }, label || "Sent to Vector");
 const say = text => text.trim() && tryApi("/api/say", { text }, "Speaking");
 
 /* ---------------- navigation ---------------- */
@@ -190,22 +190,26 @@ $("#locale").addEventListener("change", e => wp("locale", { locale: e.target.val
 
 /* ---------------- actions ---------------- */
 const TILES = [
-  ["dance", "Dance", "music", "#ff375f"], ["explore", "Explore", "compass", "#30d158"],
-  ["come_here", "Come here", "arrowdown", "#0a84ff"], ["look_at_me", "Look at me", "eye", "#64d2ff"],
-  ["fetch_cube", "Fetch cube", "cube", "#ff9f0a"], ["roll_cube", "Roll cube", "roll", "#ffd60a"],
-  ["pop_a_wheelie", "Wheelie", "wheel", "#bf5af2"], ["blackjack", "Blackjack", "cards", "#5e5ce6"],
-  ["take_photo", "Take photo", "camera", "#8e8e93"], ["go_to_charger", "Go home", "bolt", "#30d158"],
-  ["sleep", "Sleep", "moon", "#5e5ce6"], ["_listen", "Listen", "mic", "#ff453a"],
+  ["blackjack", "Blackjack", "cards", "#5e5ce6"], ["fist_bump", "Fist bump", "bolt", "#ff9f0a"],
+  ["trick", "Do a trick", "spark", "#ff375f"], ["love", "I love you", "heart", "#ff2d55"],
+  ["praise", "Good robot", "spark", "#30d158"], ["take_photo", "Take photo", "camera", "#8e8e93"],
+  ["time", "What time is it", "info", "#64d2ff"], ["hello", "Say hi", "person", "#0a84ff"],
+  ["sleep", "Sleep", "moon", "#5e5ce6"], ["go_to_charger", "Go home", "bolt", "#30d158"],
+  ["dance", "Dance", "music", "#ff375f", 1], ["explore", "Explore", "compass", "#30d158", 1],
+  ["come_here", "Come here", "arrowdown", "#0a84ff", 1], ["fetch_cube", "Fetch cube", "cube", "#ff9f0a", 1],
+  ["roll_cube", "Roll cube", "roll", "#ffd60a", 1], ["pop_a_wheelie", "Wheelie", "wheel", "#bf5af2", 1],
 ];
-$("#tiles").innerHTML = TILES.map(([k, l, i, c]) =>
-  `<button class="tile" data-a="${k}"><span class="ti" style="--c:${c}">${svg(i)}</span><b>${l}</b></button>`).join("");
+$("#tiles").innerHTML = TILES.map(([k, l, i, c, drives]) =>
+  `<button class="tile${drives ? " drives" : ""}" data-a="${k}"><span class="ti" style="--c:${c}">${svg(i)}</span><b>${l}</b>${drives ? `<small class="lockn">${svg("lock")} needs dock lock off</small>` : ""}</button>`).join("");
 $$(".tile").forEach(t => t.addEventListener("click", async () => {
   t.classList.add("busy"); setTimeout(() => t.classList.remove("busy"), 1600);
-  if (t.dataset.a === "_listen") wp("trigger_wake_word", {}, "Vector is listening");
-  else intent(t.dataset.a, t.querySelector("b").textContent);
+  await intent(t.dataset.a, t.querySelector("b").textContent);
+  if (t.dataset.a === "blackjack") $("#bj").classList.add("on");
 }));
+$("#bj-hit").addEventListener("click", () => intent("bj_hit", "Hit"));
+$("#bj-stand").addEventListener("click", () => intent("bj_stand", "Stand"));
 $$("[data-intent]").forEach(b => b.addEventListener("click", () => intent(b.dataset.intent, b.textContent.trim())));
-$("#qa-listen").addEventListener("click", () => wp("trigger_wake_word", {}, "Vector is listening"));
+$("#qa-listen").addEventListener("click", () => go("jarvis"));
 $("#ov-say").addEventListener("keydown", e => { if (e.key === "Enter") { say(e.target.value); e.target.value = ""; } });
 $("#dr-say").addEventListener("keydown", e => { if (e.key === "Enter") { say(e.target.value); e.target.value = ""; } });
 

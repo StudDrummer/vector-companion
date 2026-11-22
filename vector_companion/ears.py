@@ -94,7 +94,8 @@ class Ears:
         except Exception:  # noqa: BLE001  (first run: models not downloaded yet)
             self.setup()
             self.wake = self._wake_model()
-        self.stt = None  # loaded the first time the Mac does the listening itself
+        self.stt = None
+        self._stt()  # load now so the first "Hey Jarvis" isn't slow
 
     def _stt(self):
         if self.stt is None:
@@ -124,10 +125,10 @@ class Ears:
         import numpy as np
         return float(np.sqrt(np.mean(f.astype(np.float32) ** 2)) + 1e-6)
 
-    def record(self, wait_for_speech: float, first=None) -> "list | None":
+    def record(self, wait_for_speech: float, first=None, force: bool = False) -> "list | None":
         """Collect frames until ~0.8 s of quiet after speech. None if nobody spoke within wait_for_speech."""
         frames = list(first or [])
-        talk = max(self.noise * 2.2, 350.0)
+        talk = max(self.noise * 2.0, 18.0)  # relative to this room's background noise (quiet mics are fine)
         started, quiet, t0 = bool(first), 0, time.time()
         while True:
             try:
@@ -140,9 +141,9 @@ class Ears:
                     started = True
                     frames.append(f)
                 elif time.time() - t0 > wait_for_speech:
-                    return None
+                    return frames if force else None
                 else:
-                    frames = (frames + [f])[-4:]  # keep a little lead-in
+                    frames = frames + [f] if force else (frames + [f])[-4:]  # keep a lead-in
                 continue
             frames.append(f)
             quiet = 0 if loud else quiet + 1
@@ -156,6 +157,8 @@ class Ears:
                                       initial_prompt="Hey Jarvis, Vector, homework, focus timer, Claude.")
         text = " ".join(s.text for s in segs).strip()
         text = re.sub(r"^(hey,?\s+)?(jarvis|mycroft|alexa)[,.!]?\s*", "", text, flags=re.I).strip()
+        if re.fullmatch(r"(thank you|thanks for watching|you|bye|\.+|\W*)[.!]?", text, flags=re.I):
+            return ""  # what Whisper "hears" in silence
         return text
 
     # ------------------------------------------------------------ robot side
@@ -294,19 +297,26 @@ class Ears:
             if score < 0.85 - 0.6 * sens:
                 continue
             self.set(wake_score=round(float(score), 2), heard=self.state["heard"] + 1, state="hearing you")
-            if not (p.get("mode", "vector") == "vector" and self.robot and self.hand_to_vector()):
-                self.cue()
-                frames = self.record(wait_for_speech=4.0)
-                self.conversation(frames)
+            self.cue()
+            if not (p.get("try_handoff") and self.robot and self.hand_to_vector()):
+                frames = self.record(wait_for_speech=4.0, force=True)
+                self.conversation(frames, first=True)
             self.wake.reset()
             self.drain()
             self.set(state=f"listening for '{WAKE_WORDS[self.wake_word()]}'")
 
-    def conversation(self, frames):
+    def conversation(self, frames, first: bool = False):
         turns = 0
         while frames is not None and turns < 6:
             text = self.transcribe(frames) if frames else ""
             if not text or len(text) < 2:
+                if first and turns == 0:
+                    log("woke up but didn't catch any words")
+                    self.set(last_text="(didn't catch that)")
+                    if self.robot:
+                        from .voice import speak
+                        speak("Sorry sir, I didn't catch that." if self.prefs()["persona"].get("style") == "jarvis"
+                              else "Sorry, I didn't catch that.")
                 break
             if STOP_WORDS.match(text):
                 if self.robot:
@@ -318,6 +328,7 @@ class Ears:
             if not self.prefs()["ears"].get("follow_up", True):
                 break
             # follow-up without the wake word: wait until he's done talking, then listen a few seconds
+            time.sleep(1.5)  # actions start talking a moment later; don't hear him as you
             while time.time() < self.vector_busy_until:
                 time.sleep(0.1)
             self.drain()

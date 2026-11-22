@@ -11,6 +11,7 @@ import mimetypes
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -513,6 +514,11 @@ class Handler(BaseHTTPRequestHandler):
                                    "brain": save_brain(b["brain"]) if "brain" in b else brain_settings()})
             if path == "/api/ears/restart":
                 return self._json({"ok": restart_ears()})
+            if path == "/api/do":
+                return self._json(cc.call("/do", {"action": str(b.get("action", ""))}, timeout=90))
+            if path == "/api/app_restart":  # reload this app with the latest code
+                threading.Timer(0.5, lambda: os.execv(sys.executable, [sys.executable, "-m", "vector_companion.app"])).start()
+                return self._json({"ok": True})
             if path == "/api/companion_restart":
                 return self._json({"ok": restart_brain("companion")})
             if path == "/api/brain/restart":

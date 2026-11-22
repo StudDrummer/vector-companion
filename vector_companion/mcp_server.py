@@ -140,21 +140,25 @@ def vector_eyes(color: str) -> str:
 
 @mcp.tool()
 def vector_action(action: str) -> str:
-    """Trigger a built-in behavior. Known: dance, sleep, go_to_charger, fetch_cube, explore,
-    come_here, look_at_me, take_photo, roll_cube, blackjack, pop_a_wheelie, be_quiet.
-    Raw 'intent_*' names also work."""
-    from . import settings as S
-    if S.load()["safety"]["dock_lock"] and action in S.DOCK_BLOCKED:
-        return f"Refused: {action} would take him off the charger while the dock lock is on."
-    bot().intent(action)
-    return f"triggered {INTENTS.get(action, action)}"
+    """Make Vector do something. Known: blackjack (then bj_hit / bj_stand), fist_bump, trick, love,
+    praise, scold, hello, goodbye, time, age, name, sleep, go_to_charger, take_photo, volume_up,
+    volume_down. Driving ones (dance, explore, come_here, look_at_me, fetch_cube, roll_cube,
+    pop_a_wheelie) are refused while the dock lock is on."""
+    try:
+        r = _c("/do", {"action": action}, timeout=90)
+    except Exception as e:  # noqa: BLE001
+        return f"Couldn't: {e}"
+    return f"done: {action} {r if isinstance(r, dict) else ''}".strip()
 
 
 @mcp.tool()
 def vector_listen() -> str:
-    """Make Vector start listening as if someone said 'Hey Vector'."""
-    bot().wake_word()
-    return "listening"
+    """Make Vector start listening as if someone said 'Hey Vector' (only works on developer-unlocked robots)."""
+    try:
+        bot().wake_word()
+        return "listening"
+    except Exception as e:  # noqa: BLE001
+        return f"This Vector can't be woken remotely ({e}). Ask the user to say 'Hey Vector' or 'Hey Jarvis'."
 
 
 @mcp.tool()

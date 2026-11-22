@@ -122,6 +122,8 @@ class Companion:
         self.deaths: list[float] = []
         self.reserve = None  # second connection holding RESERVE_CONTROL: no idle wandering while docked
         self.still_paused_until = 0.0  # built-in behaviors (actions, learn face) need the hold released
+        from .actions import Actions
+        self.actions = Actions(self)
         self.mirror_on = False
         self.mirror_thread = None
         self.mirror_stop = threading.Event()
@@ -363,6 +365,15 @@ class Companion:
         else:
             with self.control() as r:
                 _do(r)
+
+    def put_screen(self, r, img, seconds: float):
+        """Put an image on his face without waiting (caller holds control)."""
+        from anki_vector import screen as scr
+        size = tuple(scr.dimensions()) if hasattr(scr, "dimensions") else (184, 96)
+        img = img.convert("RGB")
+        if img.size != size:
+            img = img.resize(size)
+        r.screen.set_screen_with_image_data(scr.convert_image_to_screen_data(img), seconds, interrupt_running=True)
 
     def face(self, icon: str = "", text: str = "", seconds: float = 3.0):
         img = face_art.text(text) if text else face_art.ICONS.get(icon, face_art.question)()
@@ -862,6 +873,9 @@ class Companion:
         time.sleep(0.8)
         taps, self._taps = len(self._taps), []
         try:
+            if self.actions.bj and self.actions.bj.active:  # in a game: tap = hit, double tap = stand
+                self.actions.run("bj_stand" if taps >= 2 else "bj_hit")
+                return
             if taps >= 2:
                 from .brain import status_report
                 self.say(status_report())
@@ -1159,6 +1173,8 @@ class Handler(BaseHTTPRequestHandler):
                     threading.Thread(target=COMP._connect_cube, daemon=True).start()
                 else:
                     COMP.cube_color(b.get("color"), float(b.get("seconds", 3)))
+            elif u.path == "/do":
+                return self._send(200, {"ok": True, **COMP.actions.run(str(b.get("action", "")))})
             elif u.path == "/mirror":
                 if b.get("on", True):
                     COMP.start_mirror(float(b.get("seconds", 120)))

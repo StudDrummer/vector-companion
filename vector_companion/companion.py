@@ -49,7 +49,7 @@ OWNER = os.environ.get("VECTOR_OWNER", "Rushil")
 # action in his queue. After one of these times out, we hand control back, which clears his queue.
 QUEUED_ACTIONS = {"play_animation_trigger", "play_animation", "set_lift_height", "set_head_angle", "say_text",
                   "drive_straight", "turn_in_place", "drive_on_charger"}
-TIMEOUTS = {"say_text": 45, "play_animation_trigger": 15, "drive_on_charger": 45, "drive_off_charger": 30,
+TIMEOUTS = {"say_text": 45, "play_animation_trigger": 20, "drive_on_charger": 45, "drive_off_charger": 30,
             "capture_single_image": 12, "request_control": 8, "release_control": 5,
             "set_screen_with_image_data": 6, "get_battery_state": 6, "connect": 20, "drive_straight": 20,
             "turn_in_place": 20}
@@ -1025,18 +1025,22 @@ class Companion:
     def _connect_cube(self):
         if not prefs().get("cube_button", True) or self.cube_connected:
             return
-        time.sleep(3)
+        if time.time() < getattr(self, "cube_retry_at", 0):
+            return  # a failed Bluetooth search also slows his Wi-Fi, so don't retry on every reconnect
+        time.sleep(8)
         try:
             raw = self.raw
             with self.control(wait=6):
-                self.cube_pool.submit(raw.world.connect_cube).result(timeout=25)
+                pass  # just make sure we hold control; don't block every other command during the search
+            self.cube_pool.submit(raw.world.connect_cube).result(timeout=25)
             cube = raw.world.connected_light_cube
             self.cube_connected = bool(cube and cube.is_connected)
             if self.cube_connected:
                 log("cube connected: tap = focus timer, double tap = status report")
                 self.cube_color("blue", 2)
         except Exception as e:  # noqa: BLE001
-            log(f"cube not connected ({e.__class__.__name__}); new battery needed?")
+            self.cube_retry_at = time.time() + 600
+            log(f"cube not connected ({e.__class__.__name__}); will try again in 10 min (or tap Connect on the Desk Guard & Cube page)")
 
     def cube_color(self, color: str | None, seconds: float = 0):
         """Light the cube: green/yellow/red/blue/white, or None for off."""
@@ -1406,6 +1410,7 @@ class Handler(BaseHTTPRequestHandler):
             elif u.path == "/cube":
                 if b.get("connect"):
                     COMP.cube_connected = False
+                    COMP.cube_retry_at = 0
                     threading.Thread(target=COMP._connect_cube, daemon=True).start()
                 else:
                     COMP.cube_color(b.get("color"), float(b.get("seconds", 3)))

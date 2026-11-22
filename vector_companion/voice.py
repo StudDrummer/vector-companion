@@ -94,6 +94,7 @@ VECTOR_COMMANDS = [
     (r"\bblack ?jack\b|play (a )?(card )?game|play cards|deal me in", "blackjack"),
     (r"^(hit|hit me|another( card)?|one more( card)?)$", "bj_hit"),
     (r"^(stand|i'?ll stand|stay|i'?m good|hold)$", "bj_stand"),
+    (r"what'?s my (card|cards|hand|score|total)|what (do|did) i (have|get)|what are my cards", "bj_status"),
     (r"\bfist ?bump", "fist_bump"),
     (r"\bdo a trick\b|something cool|show me a trick", "trick"),
     (r"\bi love you\b", "love"),
@@ -156,6 +157,33 @@ def respond(text: str, history: list[dict] | None = None) -> str:
         msgs, _ = brain.build_messages((history or [])[-8:] + [{"role": "user", "content": text}])
         reply = "".join(brain.stream_llm(msgs)).strip() or "Sorry, I didn't catch that."
     return brain.speakable(reply)
+
+
+def respond_stream(text: str, history: list[dict] | None = None):
+    """Like respond(), but AI answers come out sentence by sentence so he can start talking right away:
+    the first sentence as soon as it's written, then the rest together."""
+    from . import brain
+    action = vector_command(text)
+    if action:
+        yield run_vector_command(action)
+        return
+    reply = brain.local_skill(text)
+    if reply is not None:
+        yield brain.speakable(reply)
+        return
+    msgs, _ = brain.build_messages((history or [])[-8:] + [{"role": "user", "content": text}])
+    buf, first_done = "", False
+    for chunk in brain.stream_llm(msgs):
+        buf += chunk
+        if not first_done:
+            m = re.search(r"^(.{12,}?[.!?])(\s+|$)", buf, re.S)
+            if m:
+                yield brain.speakable(m.group(1).strip())
+                buf, first_done = buf[m.end():], True
+    if buf.strip():
+        yield brain.speakable(buf.strip())
+    elif not first_done:
+        yield "Sorry, I didn't catch that."
 
 
 def handle(text: str) -> None:

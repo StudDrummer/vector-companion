@@ -186,3 +186,157 @@ def status(lines: list[tuple[str, tuple]]) -> Image.Image:
 
 ICONS.update({"ai_done": ai_done, "ai_input": ai_input, "terminal_ok": lambda: terminal(True),
               "terminal_fail": lambda: terminal(False), "moon": moon})
+
+
+# ---------------------------------------------------------------- crisp drawing (3x, then scaled down)
+S3 = 3
+BLUE = (10, 132, 255)
+CYAN = (100, 210, 255)
+CARD = (246, 246, 248)
+INK = (28, 28, 32)
+SUIT_RED = (225, 40, 55)
+
+
+def _hi(bg=(0, 0, 0)):
+    im = Image.new("RGB", (W * S3, H * S3), bg)
+    return im, ImageDraw.Draw(im)
+
+
+def _done(im: Image.Image) -> Image.Image:
+    return im.resize((W, H), Image.LANCZOS)
+
+
+def _suit(d, suit: str, cx: float, cy: float, r: float, color):
+    """Draw a suit symbol centred at (cx, cy), roughly r wide."""
+    if suit in "♥h":
+        pts = []
+        for i in range(120):
+            t = 2 * math.pi * i / 120
+            x = 16 * math.sin(t) ** 3
+            y = 13 * math.cos(t) - 5 * math.cos(2 * t) - 2 * math.cos(3 * t) - math.cos(4 * t)
+            pts.append((cx + x * r / 34, cy - 1.5 - y * r / 34))
+        d.polygon(pts, fill=color)
+    elif suit in "♦d":
+        d.polygon([(cx, cy - r * 0.6), (cx + r * 0.42, cy), (cx, cy + r * 0.6), (cx - r * 0.42, cy)], fill=color)
+    elif suit in "♠s":
+        pts = []
+        for i in range(120):
+            t = 2 * math.pi * i / 120
+            x = 16 * math.sin(t) ** 3
+            y = 13 * math.cos(t) - 5 * math.cos(2 * t) - 2 * math.cos(3 * t) - math.cos(4 * t)
+            pts.append((cx + x * r / 34, cy - 3 + y * r / 34))
+        d.polygon(pts, fill=color)
+        d.polygon([(cx, cy), (cx + r * 0.22, cy + r * 0.55), (cx - r * 0.22, cy + r * 0.55)], fill=color)
+    else:  # clubs
+        rr = r * 0.24
+        for ox, oy in ((0, -r * 0.24), (-r * 0.25, r * 0.08), (r * 0.25, r * 0.08)):
+            d.ellipse([cx + ox - rr, cy + oy - rr, cx + ox + rr, cy + oy + rr], fill=color)
+        d.polygon([(cx, cy), (cx + r * 0.2, cy + r * 0.55), (cx - r * 0.2, cy + r * 0.55)], fill=color)
+
+
+def _card(d, x: float, y: float, w: float, h: float, rank: str | None, suit: str = "s", big: bool = False):
+    """One playing card at 3x scale: corner index (rank over a small suit), big suit if it's the top card.
+    rank None = face down."""
+    rad = w * 0.13
+    d.rounded_rectangle([x + 3, y + 4, x + w + 3, y + h + 4], rad, fill=(0, 20, 10))  # shadow
+    if rank is None:
+        d.rounded_rectangle([x, y, x + w, y + h], rad, fill=(18, 64, 160), outline=(236, 240, 255), width=4)
+        ins = w * 0.16
+        d.rounded_rectangle([x + ins, y + ins, x + w - ins, y + h - ins], rad * 0.5, outline=(110, 160, 255), width=3)
+        step = 16
+        yy = y + ins + 10
+        while yy < y + h - ins - 6:
+            xx = x + ins + 10 + ((yy - y) // step % 2) * step / 2
+            while xx < x + w - ins - 6:
+                d.polygon([(xx, yy - 5), (xx + 5, yy), (xx, yy + 5), (xx - 5, yy)], fill=(90, 140, 240))
+                xx += step
+            yy += step
+        return
+    col = SUIT_RED if suit in "hd" else INK
+    d.rounded_rectangle([x, y, x + w, y + h], rad, fill=CARD)
+    f = _font(int(h * (0.30 if len(rank) == 1 else 0.24)))
+    d.text((x + w * (0.10 if len(rank) == 1 else 0.05), y + h * 0.03), rank, fill=col, font=f)
+    _suit(d, suit, x + w * 0.24, y + h * 0.50, w * 0.34, col)
+    if big:
+        _suit(d, suit, x + w * 0.62, y + h * 0.68, w * 0.55, col)
+
+
+def _pill(d, x: float, y: float, text: str, bg, fg=(0, 0, 0), size: int = 30):
+    f = _font(size)
+    tw = d.textlength(text, font=f)
+    d.rounded_rectangle([x, y, x + tw + 26, y + size + 14], (size + 14) / 2, fill=bg)
+    d.text((x + 13, y + 5), text, fill=fg, font=f)
+
+
+def blackjack(you: list, me: list, you_total: int, me_total: int | None, banner: str = "", banner_color=GREEN):
+    """The table: Vector's hand on top (one face down until reveal), yours below, totals as pills.
+    Cards are (rank, suit) with suit one of h d s c; None = face down."""
+    im, d = _hi((5, 46, 30))  # felt
+    d.rounded_rectangle([5, 5, W * S3 - 5, H * S3 - 5], 28, outline=(24, 100, 62), width=4)
+    cw, ch = 82, 118
+    step = 52  # how much of each card shows before the next one
+
+    def row(cards, y, label, total, color):
+        x = 22
+        for i, c in enumerate(cards):
+            last = i == len(cards) - 1
+            _card(d, x, y, cw, ch, None if c is None else c[0], "s" if c is None else c[1], big=last)
+            x += step
+        px = W * S3 - 140
+        d.text((px + 4, y + 6), label, fill=(170, 200, 185), font=_font(24))
+        _pill(d, px, y + 44, "?" if total is None else str(total), color, (0, 0, 0), 40)
+
+    row(me, 18, "VECTOR", me_total, CYAN)
+    row(you, 18 + ch + 16, "YOU", you_total, YELLOW if you_total <= 21 else RED)
+    if banner:
+        f = _font(46)
+        tw = d.textlength(banner, font=f)
+        bw, bh = tw + 64, 80
+        bx, by = (W * S3 - bw) / 2, (H * S3 - bh) / 2
+        d.rounded_rectangle([bx + 4, by + 6, bx + bw + 4, by + bh + 6], 40, fill=(0, 0, 0))
+        d.rounded_rectangle([bx, by, bx + bw, by + bh], 40, fill=banner_color)
+        d.text((bx + 32, by + 12), banner, fill=(0, 0, 0), font=f)
+    return _done(im)
+
+
+def listening(level: float = 0.6) -> Image.Image:
+    """A soft waveform: shown the moment you say Hey Jarvis."""
+    im, d = _hi()
+    cx, cy = W * S3 / 2, H * S3 / 2
+    bars = [0.25, 0.45, 0.7, 1.0, 0.8, 0.55, 0.35, 0.6, 0.9, 0.5, 0.3]
+    bw, gap = 18, 14
+    total = len(bars) * bw + (len(bars) - 1) * gap
+    x = cx - total / 2
+    for i, b in enumerate(bars):
+        hh = 30 + b * level * 170
+        col = (int(60 + 40 * b), int(170 + 50 * b), 255)
+        d.rounded_rectangle([x, cy - hh / 2, x + bw, cy + hh / 2], bw / 2, fill=col)
+        x += bw + gap
+    return _done(im)
+
+
+def thinking_dots(phase: int = 0) -> Image.Image:
+    im, d = _hi()
+    cx, cy = W * S3 / 2, H * S3 / 2
+    for i in range(3):
+        on = i == phase % 3
+        r = 22 if on else 15
+        col = CYAN if on else (60, 90, 120)
+        x = cx + (i - 1) * 70
+        d.ellipse([x - r, cy - r, x + r, cy + r], fill=col)
+    return _done(im)
+
+
+def card_hud(title: str, lines: list[tuple[str, tuple]], accent=CYAN) -> Image.Image:
+    """A clean info card: accent bar + title + up to 3 lines (status, weather, timers)."""
+    im, d = _hi()
+    d.rounded_rectangle([8, 8, 20, H * S3 - 8], 6, fill=accent)
+    d.text((40, 10), title.upper(), fill=accent, font=_font(34))
+    y = 62
+    for txt, col in lines[:3]:
+        d.text((40, y), txt, fill=col, font=_font(46 if len(txt) < 14 else 38))
+        y += 72
+    return _done(im)
+
+
+ICONS.update({"listening": listening, "thinking": thinking_dots})

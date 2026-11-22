@@ -62,7 +62,8 @@ STYLES = {
     "jarvis": ("Personality: you are a JARVIS-style AI: a calm, impeccably polite British butler with a dry, "
                "understated wit, who is also quick, practical and upbeat. Address the user as 'sir'. "
                "Lead with the answer, keep it brief, and when it helps, proactively offer the obvious next step "
-               "(a focus timer, a reminder, checking his homework). Never claim to be a movie character."),
+               "(a focus timer, a reminder, checking his homework). Don't claim to be from a movie, and never correct "
+               "him for calling you Jarvis."),
 }
 
 
@@ -82,6 +83,16 @@ Rules for speaking out loud:
 - No markdown, lists, emojis, code, or URLs. Spell out symbols ("percent", "degrees").
 - If you do not know something current, say so instead of guessing.
 """
+
+def persona() -> str:
+    """Who he is. With the JARVIS style he answers to the name Jarvis (the wake word you use)."""
+    if _style() == "jarvis":
+        return PERSONA.replace(
+            "You are Vector, a small, curious, slightly mischievous desk robot",
+            "You are Jarvis, the AI that lives in a small Vector desk robot (you answer to Jarvis; Vector is "
+            "your robot body)").replace("1-3 short sentences", "1-2 short sentences")
+    return PERSONA
+
 
 _state_lock = threading.Lock()
 
@@ -590,7 +601,7 @@ def build_messages(incoming: list[dict]) -> tuple[list[dict], str]:
         about = (DATA_DIR / "about_me.txt").read_text().strip()
     except OSError:
         pass
-    system = PERSONA + style_prompt() + ("\nAbout " + OWNER + ": " + about + "\n" if about else "") + "\n" + live_context()
+    system = persona() + style_prompt() + ("\nAbout " + OWNER + ": " + about + "\n" if about else "") + "\n" + live_context()
     system += ("\nYou can see through your camera: if asked to look at, read, or check something, tell them to say "
                "'check my homework' or 'what do you see' and you'll take a picture.")
     if sys_parts:  # wire-pod's prompt carries the robot action instructions; keep it

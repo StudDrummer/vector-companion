@@ -147,13 +147,14 @@ class Ears:
                 continue
             frames.append(f)
             quiet = 0 if loud else quiet + 1
-            if quiet >= 10 or len(frames) * FRAME / SR > 12:
+            if quiet >= 8 or len(frames) * FRAME / SR > 12:
                 return frames
 
     def transcribe(self, frames) -> str:
         import numpy as np
         audio = np.concatenate(frames).astype(np.float32) / 32768.0
         segs, _ = self._stt().transcribe(audio, language="en", beam_size=1, vad_filter=False,
+                                         condition_on_previous_text=False, without_timestamps=True,
                                       initial_prompt="Hey Jarvis, Vector, homework, focus timer, Claude.")
         text = " ".join(s.text for s in segs).strip()
         text = re.sub(r"^(hey,?\s+)?(jarvis|mycroft|alexa)[,.!]?\s*", "", text, flags=re.I).strip()
@@ -178,13 +179,19 @@ class Ears:
             subprocess.Popen(["afplay", "/System/Library/Sounds/Tink.aiff"], stdout=subprocess.DEVNULL,
                              stderr=subprocess.DEVNULL)
         if self.robot:
-            def show():
-                from .companion_client import call
-                try:
-                    call("/face", {"text": "LISTENING", "seconds": 2.5}, timeout=6)
-                except Exception:  # noqa: BLE001
-                    pass
-            threading.Thread(target=show, daemon=True).start()
+            self.face("listening", 6)
+
+    def face(self, icon: str, seconds: float):
+        if not self.robot:
+            return
+
+        def show():
+            from .companion_client import call
+            try:
+                call("/face", {"icon": icon, "seconds": seconds}, timeout=8)
+            except Exception:  # noqa: BLE001
+                pass
+        threading.Thread(target=show, daemon=True).start()
 
     can_trigger: "bool | None" = None  # can WirePod start his listening directly? (developer robots only)
 
@@ -212,20 +219,42 @@ class Ears:
             return False
 
     def answer(self, text: str) -> None:
-        from .voice import respond, speak
+        """Think and talk at the same time: he starts on the first sentence while the rest is written."""
+        from .voice import respond_stream, speak
         if time.time() - self.history_at > 180:
             self.history = []
         self.set(state="thinking", last_text=text)
-        reply = respond(text, self.history)
-        self.history += [{"role": "user", "content": text}, {"role": "assistant", "content": reply}]
+        t0 = time.time()
+        q: queue.Queue = queue.Queue()
+
+        def produce():
+            try:
+                for part in respond_stream(text, self.history):
+                    q.put(part)
+            except Exception as e:  # noqa: BLE001
+                log(f"answer failed: {e}")
+                q.put("Sorry, something went wrong on my end.")
+            q.put(None)
+        threading.Thread(target=produce, daemon=True).start()
+        parts, first_at = [], None
+        while True:
+            part = q.get()
+            if part is None:
+                break
+            parts.append(part)
+            if part.strip():
+                first_at = first_at or time.time()
+                self.set(state="speaking", last_reply=" ".join(parts))
+                if self.robot:
+                    speak(part)
+                else:
+                    print("   reply:", part)
+        reply = " ".join(p for p in parts if p).strip()
+        self.history += [{"role": "user", "content": text}, {"role": "assistant", "content": reply or "(done)"}]
         self.history_at = time.time()
-        self.set(state="speaking", last_reply=reply)
-        log(f"heard: {text!r} -> {reply[:120]!r}")
-        if self.robot:
-            speak(reply)
-            self.vector_busy_until = time.time() + 0.8
-        else:
-            print("   reply:", reply)
+        self.vector_busy_until = time.time() + 0.8
+        log(f"heard: {text!r} -> {reply[:120]!r} (first words after {((first_at or time.time()) - t0):.1f}s, "
+            f"done in {time.time() - t0:.1f}s)")
 
     # ------------------------------------------------------------ main loop
     def run(self):
@@ -308,7 +337,12 @@ class Ears:
     def conversation(self, frames, first: bool = False):
         turns = 0
         while frames is not None and turns < 6:
+            t0 = time.time()
+            if frames:
+                self.face("thinking", 4)
             text = self.transcribe(frames) if frames else ""
+            if text:
+                log(f"speech-to-text took {time.time() - t0:.1f}s for {len(frames) * FRAME / SR:.1f}s of audio")
             if not text or len(text) < 2:
                 if first and turns == 0:
                     log("woke up but didn't catch any words")

@@ -128,6 +128,8 @@ class Companion:
         self._wake = threading.Event()
         self.speaking_until = 0.0
         self.audio_broken_until = 0.0
+        self.ctl_held = False
+        self.ctl_last = 0.0
         self.stats = {"since": time.time(), "drops": [], "wake_words": [], "intents": [], "taps": 0}
         self.guard = None  # {"since": ts, "events": [...]} while desk guard is on
         self.deaths: list[float] = []
@@ -140,7 +142,7 @@ class Companion:
         self.mirror_stop = threading.Event()
         self.cube_connected = False
         self._taps: list[float] = []
-        for fn in (self._connect_loop, self._pet_loop, self._watch_loop, self._drive_loop):
+        for fn in (self._connect_loop, self._pet_loop, self._watch_loop, self._drive_loop, self._release_loop):
             threading.Thread(target=fn, daemon=True).start()
 
     # ------------------------------------------------------------ connection
@@ -172,6 +174,7 @@ class Companion:
             log(f"link lost: {why}")
             self.stats["drops"] = [t for t in self.stats["drops"] if time.time() - t < 86400] + [time.time()]
         self.cube_connected = False
+        self.ctl_held = False
         self.error = why
         self.deaths = [t for t in self.deaths if time.time() - t < 120] + [time.time()]
         # hung calls keep their worker threads busy; start a fresh pool so new commands aren't stuck behind them
@@ -340,21 +343,47 @@ class Companion:
                 raise RuntimeError("Vector is busy with something else; try again in a moment.")
             try:
                 r = self.o.robot
-                r.conn.request_control(timeout=6)
+                if not self.o.has_control():  # asking for control takes ~1 s; keep it between commands
+                    r.conn.request_control(timeout=6)
+                    self.o.ctl_held = True
+                self.o.ctl_last = time.time()
                 return r
             except Exception:
                 self.o.lock.release()
                 raise
 
         def __exit__(self, *exc):
+            self.o.ctl_last = time.time()  # released by _release_loop after a quiet moment, not right away
+            self.o.lock.release()
+            return False
+
+    CONTROL_IDLE = 15.0  # seconds of quiet before handing his body back to him
+
+    def has_control(self) -> bool:
+        if not self.ctl_held or self._robot is None:
+            return False
+        try:
+            return bool(self._robot.conn._control_events.has_control)
+        except Exception:  # noqa: BLE001
+            return self.ctl_held
+
+    def _release_loop(self):
+        while True:
+            time.sleep(1)
+            if not self.ctl_held or time.time() - self.ctl_last < self.CONTROL_IDLE or self.mirror_on:
+                continue
+            if self.actions.bj and self.actions.bj.active and time.time() - self.ctl_last < 180:
+                continue  # keep the cards on his face while you think
+            if not self.lock.acquire(blocking=False):
+                continue
             try:
-                if self.o.connected:
-                    self.o.robot.conn.release_control(timeout=4)
+                if self.connected and time.time() - self.ctl_last >= self.CONTROL_IDLE:
+                    self.robot.conn.release_control(timeout=4)
             except Exception:  # noqa: BLE001
                 pass
             finally:
-                self.o.lock.release()
-            return False
+                self.ctl_held = False
+                self.lock.release()
 
     def control(self, wait: float = 12):
         return Companion._Control(self, wait)
@@ -387,8 +416,11 @@ class Companion:
         r.screen.set_screen_with_image_data(scr.convert_image_to_screen_data(img), seconds, interrupt_running=True)
 
     def face(self, icon: str = "", text: str = "", seconds: float = 3.0):
+        """Put an icon or words on his face and return right away (doesn't hold him up)."""
         img = face_art.text(text) if text else face_art.ICONS.get(icon, face_art.question)()
-        self.show(img, seconds)
+        with self.control(wait=4) as r:
+            self.put_screen(r, img, seconds)
+        self.ctl_last = time.time() + seconds  # keep control while it's showing
 
     def say(self, text: str):
         with self.control() as r:

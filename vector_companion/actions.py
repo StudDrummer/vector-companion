@@ -78,6 +78,9 @@ class Actions:
             self.bj = Blackjack(self)
             threading.Thread(target=self.bj.deal, daemon=True).start()
             return {"started": "blackjack"}
+        if a == "bj_status":
+            self.say(self.bj.describe() if self.bj else "We're not in a game. Say play blackjack to start one.")
+            return {}
         if a in ("bj_hit", "bj_stand"):
             if not (self.bj and self.bj.active):
                 self.say("We're not playing right now. Say play blackjack to start a game.")
@@ -157,9 +160,12 @@ RANKS = ["A", "2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K"]
 NAMES = {"A": "an ace", "J": "a jack", "Q": "a queen", "K": "a king", "8": "an 8"}
 
 
-def value(hand: list[str]) -> int:
+SUITS = "hdsc"
+
+
+def value(hand: list) -> int:
     total, aces = 0, 0
-    for c in hand:
+    for c in (x[0] for x in hand):
         total += 11 if c == "A" else 10 if c in ("J", "Q", "K") else int(c)
         aces += c == "A"
     while total > 21 and aces:
@@ -167,8 +173,9 @@ def value(hand: list[str]) -> int:
     return total
 
 
-def spoken(card: str) -> str:
-    return NAMES.get(card, f"a {card}")
+def spoken(card) -> str:
+    r = card[0]
+    return NAMES.get(r, f"a {r}")
 
 
 class Blackjack:
@@ -177,24 +184,30 @@ class Blackjack:
 
     def __init__(self, actions: Actions):
         self.a, self.c = actions, actions.c
-        self.deck = RANKS * 4
+        self.deck = [(r, s) for r in RANKS for s in SUITS]
         random.shuffle(self.deck)
-        self.you: list[str] = []
-        self.me: list[str] = []
+        self.you: list = []
+        self.me: list = []
         self.active = False
         self.lock = threading.Lock()
 
-    def table(self, reveal: bool = False):
-        mine = " ".join(self.me) if reveal else f"{self.me[0]} ?"
-        return face_art.status([(f"YOU {value(self.you)}", GOLD), ("  " + " ".join(self.you), WHITE),
-                                (f"ME {value(self.me) if reveal else '?'}", BLUE), ("  " + mine, WHITE)])
+    def table(self, reveal: bool = False, banner: str = "", color=GREEN):
+        me = self.me if reveal else [self.me[0], None]
+        return face_art.blackjack(self.you, me, value(self.you), value(self.me) if reveal else None, banner, color)
 
-    def present(self, text: str, reveal: bool = False, linger: float = 3.0):
+    def present(self, text: str, reveal: bool = False, linger: float = 3.0, banner: str = "", color=GREEN):
         """Cards on his face while he talks, then a few seconds more."""
         with self.c.control() as r:
-            self.c.put_screen(r, self.table(reveal), 60)
+            self.c.put_screen(r, self.table(reveal, banner, color), 60)
             self.c.speak(r, text)
-            time.sleep(linger)
+        self.c.ctl_last = time.time() + linger  # the table stays up; nothing waits on it
+
+    def describe(self) -> str:
+        """For "what's my card?" mid-game."""
+        if not self.active:
+            return "We're not in a game. Say play blackjack to start one."
+        cards = ", ".join(spoken(c) for c in self.you)
+        return f"You have {cards}, that's {value(self.you)}. I'm showing {spoken(self.me[0])}. Hit or stand?"
 
     def deal(self):
         with self.lock:
@@ -251,7 +264,8 @@ class Blackjack:
         self.active = False
         if self.c.cube_connected:
             self.c.cube_color({"win": "red", "lose": "green"}.get(outcome, "yellow"), 5)
-        self.present(text, reveal=True, linger=2.5)
+        banner, color = {"win": ("VECTOR WINS", RED), "lose": ("YOU WIN!", GREEN)}.get(outcome, ("PUSH", GOLD))
+        self.present(text, reveal=True, linger=3.5, banner=banner, color=color)
         try:
             self.a.anim(outcome)
         except Exception:  # noqa: BLE001

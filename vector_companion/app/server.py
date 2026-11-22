@@ -429,6 +429,9 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(cc.call(path[len("/api/companion"):], timeout=4))
             if path.startswith("/api/guard_photo/"):
                 return self._send(200, cc.call("/guard_photo/" + os.path.basename(path), timeout=6), "image/jpeg")
+            if path == "/api/study":
+                from ..companion import study_today
+                return self._json({"today": study_today()})
             if path == "/api/ears":
                 return self._json(ears_status())
             if path == "/api/voices":
@@ -514,6 +517,8 @@ class Handler(BaseHTTPRequestHandler):
                                    "brain": save_brain(b["brain"]) if "brain" in b else brain_settings()})
             if path == "/api/ears/restart":
                 return self._json({"ok": restart_ears()})
+            if path == "/api/quiz":
+                return self._json(cc.call("/quiz", {"topic": str(b.get("topic", ""))}, timeout=10))
             if path == "/api/do":
                 return self._json(cc.call("/do", {"action": str(b.get("action", ""))}, timeout=90))
             if path == "/api/app_restart":  # reload this app with the latest code

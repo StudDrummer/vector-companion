@@ -336,7 +336,7 @@ class Ears:
 
     def conversation(self, frames, first: bool = False):
         turns = 0
-        while frames is not None and turns < 6:
+        while frames is not None and turns < 12:
             t0 = time.time()
             if frames:
                 self.face("thinking", 4)
@@ -367,7 +367,9 @@ class Ears:
                 time.sleep(0.1)
             self.drain()
             self.set(state="listening for a follow-up")
-            frames = self.record(wait_for_speech=5.0)
+            from .voice import game_state
+            g = game_state()  # in a quiz or a game you get longer to answer
+            frames = self.record(wait_for_speech=15.0 if (g.get("quiz") or g.get("blackjack")) else 5.0)
 
 
 def main(argv: list[str]) -> None:

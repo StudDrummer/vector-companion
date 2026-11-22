@@ -219,12 +219,12 @@ class Blackjack:
                     from anki_vector import screen as scr
                     data = scr.convert_image_to_screen_data(self.current.convert("RGB"))
                     raw = self.c.raw
-                    raw_call(lambda: raw.screen.set_screen_with_image_data(data, 4, interrupt_running=False), 4,
+                    raw_call(lambda: raw.screen.set_screen_with_image_data(data, 2.5, interrupt_running=True), 4,
                              "keep_table", kill_link=False)
                     self.c.ctl_last = time.time()
             except Exception:  # noqa: BLE001
                 pass
-            time.sleep(2)
+            time.sleep(0.8)  # faster than his eye animation can take the screen back
         self.refresher = None
 
     def describe(self) -> str:

@@ -136,6 +136,12 @@
     <section id="actions" class="page">
       <h2 class="ptitle">Actions</h2>
       <p class="lead">Things he does on request. You can also just say them: "Hey Jarvis, play blackjack".</p>
+      <div class="group-title">Study</div>
+      <div class="group">
+        <div class="row"><div class="rl">Quiz me<small>Five questions out loud; answer by voice ("Hey Jarvis" first, then just talk). Leave blank to review past mistakes.</small></div><div class="rr grow"><input id="quiz-topic" class="field" placeholder="DNA replication, SAT vocab, kinematics..."><button class="btn primary small" id="quiz-go">Start</button></div></div>
+        <div class="row"><div class="rl">Study session<small>He checks in halfway and logs your minutes</small></div><div class="rr grow"><input id="study-goal" class="field" placeholder="What are you working on?"><button class="btn primary small" id="study-go">25 min</button></div></div>
+        <div class="row"><div class="rl">Studied today</div><div class="rr" id="study-today">--</div></div>
+      </div>
       <div class="group bj" id="bj"><div class="row"><div class="rl">Blackjack<small>Cards are on his face. Or say "hit" / "stand", or tap the cube once to hit, twice to stand.</small></div><div class="rr"><button class="btn primary small" id="bj-hit">Hit</button> <button class="btn small" id="bj-stand">Stand</button></div></div></div>
       <div class="tiles" id="tiles"></div>
     </section>
@@ -185,6 +191,9 @@
       <div class="group">
         <div class="row"><div class="rl">Length</div><div class="rr"><div class="stepper" data-c="focus_minutes" data-step="5" data-min="5" data-unit=" min"></div></div></div>
         <div class="row"><div class="rl">Check in every 5 minutes on his face</div><div class="rr"><label class="sw"><input type="checkbox" data-c="focus_checkins"><span></span></label></div></div>
+        <div class="row"><div class="rl">Stretch reminders<small>When he's seen you at your desk this long without a break</small></div><div class="rr"><label class="sw"><input type="checkbox" data-c="stretch_reminders"><span></span></label></div></div>
+        <div class="row"><div class="rl">Remind after</div><div class="rr"><div class="stepper" data-c="stretch_minutes" data-step="10" data-min="20" data-unit=" min"></div></div></div>
+        <div class="row"><div class="rl">Late-night nudge<small>Once a night after 11 PM if you're still at your desk</small></div><div class="rr"><label class="sw"><input type="checkbox" data-c="bedtime_nudge"><span></span></label></div></div>
         <div class="row"><div class="rl" id="focus-state">No timer running</div><div class="rr"><button class="btn primary small" id="focus-go">Start</button><button class="btn small" id="focus-stop">Stop</button></div></div>
       </div>
       <div class="group-title">Try it</div>

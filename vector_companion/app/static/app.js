@@ -65,7 +65,7 @@ const say = text => text.trim() && tryApi("/api/say", { text }, "Speaking");
 
 /* ---------------- navigation ---------------- */
 const hooks = { drive: [enterDrive, leaveDrive], scan: [startScan, stopScanCam], personality: [loadPersonality], people: [loadFaces], photos: [loadPhotos], brain: [loadBrain],
-  notify: [loadNotify], about: [loadAbout], jarvis: [loadJarvis], guard: [loadGuard], eyes: [loadRobotSettings], general: [loadRobotSettings], voice: [loadRobotSettings] };
+  notify: [loadNotify], about: [loadAbout], jarvis: [loadJarvis], guard: [loadGuard], actions: [loadStudy], eyes: [loadRobotSettings], general: [loadRobotSettings], voice: [loadRobotSettings] };
 let current = null;
 function go(id) {
   if (current === id) return;
@@ -206,6 +206,9 @@ $$(".tile").forEach(t => t.addEventListener("click", async () => {
   await intent(t.dataset.a, t.querySelector("b").textContent);
   if (t.dataset.a === "blackjack") $("#bj").classList.add("on");
 }));
+$("#quiz-go").addEventListener("click", () => tryApi("/api/quiz", { topic: $("#quiz-topic").value.trim() || "my mistakes" }, "Making your quiz..."));
+$("#study-go").addEventListener("click", async () => { await tryApi("/api/companion/focus", { minutes: 25, goal: $("#study-goal").value.trim() }, "Study session started"); });
+async function loadStudy() { try { const s = await api("/api/study"); $("#study-today").textContent = s.today ? `${s.today} min` : "Nothing yet"; } catch { } }
 $("#bj-hit").addEventListener("click", () => intent("bj_hit", "Hit"));
 $("#bj-stand").addEventListener("click", () => intent("bj_stand", "Stand"));
 $$("[data-intent]").forEach(b => b.addEventListener("click", () => intent(b.dataset.intent, b.textContent.trim())));

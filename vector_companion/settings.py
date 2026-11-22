@@ -37,7 +37,8 @@ DEFAULTS: dict = {
     "safety": {"dock_lock": True, "keep_still": True},
     "companion": {"pet_hearts": True, "greetings": True, "morning_briefing": True,
                   "face_icons": True, "focus_minutes": 25, "focus_checkins": True,
-                  "cube_button": True},
+                  "cube_button": True, "stretch_reminders": True, "stretch_minutes": 50,
+                  "bedtime_nudge": True, "dock_head_angle": 25},
     # how he sounds: his own robot voice, or a Mac voice played through his speaker
     "voice": {"engine": "auto", "mac_voice": "Daniel", "rate": 190, "volume": 80},
     # "Hey Jarvis" through the Mac's microphone (Vector Ears)

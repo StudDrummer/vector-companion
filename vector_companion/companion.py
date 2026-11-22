@@ -137,6 +137,8 @@ class Companion:
         self.still_paused_until = 0.0  # built-in behaviors (actions, learn face) need the hold released
         from .actions import Actions
         self.actions = Actions(self)
+        self.quiz = None
+        self.presence = {"since": 0.0, "last": 0.0, "reminded": 0.0}
         self.mirror_on = False
         self.mirror_thread = None
         self.mirror_stop = threading.Event()
@@ -251,6 +253,7 @@ class Companion:
             try:
                 self.reserve = self.call(hold, 15, "reserve_control", kill_link=False)
                 log("holding him still on the dock (no idle wandering)")
+                threading.Thread(target=self._look_up, daemon=True).start()
             except Exception as e:  # noqa: BLE001
                 log(f"couldn't reserve control: {e.__class__.__name__}")
         elif not want and self.reserve is not None:
@@ -300,6 +303,15 @@ class Companion:
                 pass
             log(f"released the hold for {seconds:.0f} s so he can run a built-in behavior")
         threading.Timer(self.still_paused_until - time.time() + 0.5, self._sync_reserve).start()
+
+    def _look_up(self):
+        """While he sits still, tilt his head up so he can see (and recognize) you."""
+        try:
+            from anki_vector.util import degrees
+            with self.control(wait=5) as r:
+                r.behavior.set_head_angle(degrees(float(prefs().get("dock_head_angle", 25))))
+        except Exception:  # noqa: BLE001
+            pass
 
     def _drop_reserve(self):
         rc, self.reserve = self.reserve, None
@@ -740,26 +752,35 @@ class Companion:
             self.scanning = False
 
     # ------------------------------------------------------------ focus timer
-    def start_focus(self, minutes: int | None = None):
+    def start_focus(self, minutes: int | None = None, goal: str = ""):
         minutes = max(1, int(minutes or prefs()["focus_minutes"]))
         self.focus_id += 1
         fid = self.focus_id
-        self.focus = {"end": time.time() + minutes * 60, "total": minutes, "id": fid}
+        self.focus = {"end": time.time() + minutes * 60, "total": minutes, "id": fid, "goal": goal.strip(),
+                      "start": time.time()}
         threading.Thread(target=self._focus_loop, args=(fid, minutes), daemon=True).start()
         return {k: v for k, v in self.focus.items() if k != "id"}
 
     def stop_focus(self):
+        f = self.focus
+        if f:
+            done = (time.time() - f["start"]) / 60
+            if done >= 5:
+                log_study(int(done), f.get("goal", ""), finished=False)
         self.focus = None
         self.focus_id += 1
 
     def _focus_loop(self, fid: int, total: int):
+        goal = (self.focus or {}).get("goal", "")
+        jarvis = S.load().get("persona", {}).get("style") == "jarvis"
         try:
             with self.control() as r:
                 self.show(face_art.timer(total, total), 3, with_control=r)
-                self.speak(r, f"{total} minute focus timer. Go get it.")
+                self.speak(r, f"{total} minutes on {goal}. Go get it." if goal else f"{total} minute focus timer. Go get it.")
         except Exception as e:  # noqa: BLE001
             log(f"focus start display failed: {e}")
         shown = total
+        halfway_said = total < 10
         while self.focus and self.focus["id"] == fid:
             left = self.focus["end"] - time.time()
             if left <= 0:
@@ -770,6 +791,11 @@ class Companion:
             if self.cube_connected and color != getattr(self, "_cube_shown", None):
                 self._cube_shown = color
                 self.cube_color(color)
+            if not halfway_said and left <= total * 30:
+                halfway_said = True
+                line = (f"Halfway there{', sir' if jarvis else ''}. " +
+                        (f"How's {goal} going? " if goal else "") + "Keep it up.")
+                threading.Thread(target=lambda: _quiet(self.say, line), daemon=True).start()
             if prefs()["focus_checkins"] and mins % 5 == 0 and mins != shown:
                 shown = mins
                 try:
@@ -791,8 +817,10 @@ class Companion:
                         if trig:
                             play_trigger(r, trig)
                     self.show(face_art.check(), 2, with_control=r)
-                    self.speak(r, f"Time's up {OWNER}! {total} minute{'s' if total != 1 else ''} done. "
-                                  "Take a five minute break.")
+                    today = log_study(total, goal, finished=True)
+                    self.speak(r, f"Time's up{', sir' if jarvis else ' ' + OWNER}! {total} minute{'s' if total != 1 else ''} "
+                                  + (f"on {goal} " if goal else "") + f"done. That's {today} minute{'s' if today != 1 else ''} today. "
+                                  + ("Did you finish it? " if goal else "") + "Take a five minute break.")
                 break
             except Exception as e:  # noqa: BLE001
                 log(f"focus end attempt {attempt + 1} failed: {e}")
@@ -1033,6 +1061,7 @@ class Companion:
             name = (getattr(event, "name", "") or "").strip()
         except Exception:  # noqa: BLE001
             return
+        self._presence()
         if self.guard and name.lower() == OWNER.lower():
             self.last_greet[name] = time.time()
             threading.Thread(target=self.stop_guard, args=(True,), daemon=True).start()
@@ -1044,6 +1073,34 @@ class Companion:
             return
         self.last_greet[name] = now
         threading.Thread(target=self._greet, args=(name,), daemon=True).start()
+
+    def _presence(self):
+        """Seeing a face at the desk = you're there. Long stretches get a stand-up reminder; late nights a nudge."""
+        now = time.time()
+        p = self.presence
+        if now - p["last"] > 600:  # away 10+ minutes: a new sitting starts
+            p["since"] = now
+        p["last"] = now
+        c = prefs()
+        busy = (self.focus or (self.quiz and self.quiz.active) or (self.actions.bj and self.actions.bj.active)
+                or now < self.speaking_until or self.guard or S.in_quiet_hours())
+        if busy:
+            return
+        jarvis = S.load().get("persona", {}).get("style") == "jarvis"
+        mins = int(c.get("stretch_minutes", 50))
+        if c.get("stretch_reminders", True) and now - p["since"] > mins * 60 and now - p["reminded"] > mins * 60:
+            p["reminded"] = now
+            msg = (f"You've been at your desk for {mins} minutes{', sir' if jarvis else ''}. "
+                   "Stand up, stretch, and grab some water.")
+            threading.Thread(target=lambda: _quiet(self.say, msg), daemon=True).start()
+            log("stretch reminder")
+            return
+        hour = datetime.now().hour
+        if c.get("bedtime_nudge", True) and (hour >= 23 or hour < 4) and p.get("nudged") != datetime.now().date():
+            p["nudged"] = datetime.now().date()
+            msg = ("It's getting late, sir. Shall we wrap up for tonight?" if jarvis
+                   else "It's getting late. Maybe wrap up soon so you're fresh tomorrow?")
+            threading.Thread(target=lambda: _quiet(self.say, msg), daemon=True).start()
 
     def greeting_text(self, name: str) -> str:
         now = datetime.now()
@@ -1138,6 +1195,8 @@ class Handler(BaseHTTPRequestHandler):
                                         "scanning": COMP.scanning, "triggers": len(COMP.triggers),
                                         "focus": {"left_s": int(f["end"] - time.time()), "total": f["total"]} if f else None,
                                         "mirror": COMP.mirror_on, "holding_still": COMP.reserve is not None,
+                                        "quiz": bool(COMP.quiz and COMP.quiz.active),
+                                        "blackjack": bool(COMP.actions.bj and COMP.actions.bj.active),
                                         "prefs": prefs(), "safety": safety(), "guard": bool(COMP.guard),
                                         "speaking": time.time() < COMP.speaking_until, "voice": COMP.voice_engine(),
                                         "cube": COMP.cube_connected})
@@ -1204,7 +1263,7 @@ class Handler(BaseHTTPRequestHandler):
                 if b.get("stop"):
                     COMP.stop_focus()
                     return self._send(200, {"ok": True})
-                return self._send(200, {"ok": True, "focus": COMP.start_focus(b.get("minutes"))})
+                return self._send(200, {"ok": True, "focus": COMP.start_focus(b.get("minutes"), str(b.get("goal", "")))})
             elif u.path == "/greet_test":
                 return self._send(200, {"ok": True, "text": COMP.greeting_text(OWNER)})
             elif u.path == "/guard":
@@ -1216,6 +1275,15 @@ class Handler(BaseHTTPRequestHandler):
                     threading.Thread(target=COMP._connect_cube, daemon=True).start()
                 else:
                     COMP.cube_color(b.get("color"), float(b.get("seconds", 3)))
+            elif u.path == "/quiz":
+                from .quiz import Quiz
+                COMP.quiz = Quiz(COMP, str(b.get("topic", "")))
+                threading.Thread(target=lambda: _safe(COMP.quiz.start), daemon=True).start()
+            elif u.path == "/quiz_answer":
+                q = COMP.quiz
+                if not (q and q.active):
+                    return self._send(200, {"ok": True, "active": False})
+                threading.Thread(target=lambda: _safe(q.answer, str(b.get("text", ""))), daemon=True).start()
             elif u.path == "/do":
                 return self._send(200, {"ok": True, **COMP.actions.run(str(b.get("action", "")))})
             elif u.path == "/mirror":
@@ -1232,6 +1300,28 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, {"ok": True})
         except Exception as e:  # noqa: BLE001
             return self._err(e)
+
+
+STUDY_LOG = S.DATA_DIR / "study_log.json"
+
+
+def log_study(minutes: int, goal: str = "", finished: bool = True) -> int:
+    """Add a study session; returns today's total minutes."""
+    data = _load(STUDY_LOG, {})
+    day = datetime.now().strftime("%Y-%m-%d")
+    d = data.setdefault(day, {"minutes": 0, "sessions": []})
+    d["minutes"] += int(minutes)
+    d["sessions"].append({"at": datetime.now().strftime("%H:%M"), "minutes": int(minutes), "goal": goal,
+                          "finished": finished})
+    try:
+        STUDY_LOG.write_text(json.dumps(data, indent=1))
+    except OSError:
+        pass
+    return d["minutes"]
+
+
+def study_today() -> int:
+    return int(_load(STUDY_LOG, {}).get(datetime.now().strftime("%Y-%m-%d"), {}).get("minutes", 0))
 
 
 def _quiet(fn, *a):

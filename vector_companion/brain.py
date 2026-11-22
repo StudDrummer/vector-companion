@@ -278,12 +278,22 @@ def local_skill(utterance: str) -> str | None:
             except Exception:  # noqa: BLE001
                 pass
             return "There's no timer running."
-        if re.search(r"pomodoro|study timer|focus timer|timer for|focus mode", t):
+        if re.search(r"how (much|long) (did|have) i (study|studied|focus)|study (time|minutes) today", t):
+            from .companion import study_today
+            m = study_today()
+            return (f"You've studied {m} minute{'s' if m != 1 else ''} today." + (" Nice work." if m >= 60 else "")) if m else \
+                "No study sessions logged today yet. Want to start one?"
+        if re.search(r"pomodoro|study timer|focus timer|timer for|focus mode|study session|let'?s (study|focus)|"
+                     r"(start|begin) (studying|focusing)|^(let'?s |i'?m going to |time to |help me )?focus on ", t):
             mins = _minutes(t) or 25
+            g = re.search(r"(?:session|focus|studying|study|timer|pomodoro|mode)\s+(?:on|for)\s+(?!\d)(.+?)"
+                          r"(?:\s+for\s+\d+.*)?$", orig, re.I)
+            goal = g.group(1).strip() if g else ""
+            goal = re.sub(r"^(my|the)\s+", "", goal, flags=re.I)
             try:
                 from .companion_client import call
-                call("/focus", {"minutes": mins})
-                return "Focus mode on."
+                call("/focus", {"minutes": mins, "goal": goal})
+                return ""
             except Exception:  # noqa: BLE001
                 _speak_later(f"Time's up {OWNER}! {mins} minutes done. Take a five minute break.", mins * 60)
                 return f"Starting a {mins} minute focus timer. I'll tell you when it's done. Go get it."
@@ -386,6 +396,14 @@ def status_report() -> str:
         pass
     todo = _load(TODO_FILE, [])
     lines.append(f"{len(todo)} thing{'s' if len(todo) != 1 else ''} on your list." if todo else "Your list is clear.")
+    try:
+        from .companion import study_today
+        sm = study_today()
+        if sm:
+            lines.append(f"You've studied {sm} minute{'s' if sm != 1 else ''} today.")
+            hud.append((f"STUDIED {sm} MIN", (48, 215, 75)))
+    except Exception:  # noqa: BLE001
+        pass
     hud.append((f"LIST {len(todo)}", (240, 240, 245)))
     c = _recent("claude")
     if c and time.time() - c["at"] < 6 * 3600:
@@ -424,7 +442,7 @@ def _model() -> str:
 
 # Models that "think" before answering. Fine for homework photos, far too slow (and often empty) for talking.
 THINKERS = re.compile(r"qwen3|deepseek-r1|qwq|gpt-oss|magistral|phi4-reasoning|cogito", re.I)
-FAST_TALKERS = ("llama3.2:3b", "llama3.2", "gemma3:4b", "llama3.1:8b", "qwen2.5:7b", "qwen2.5:3b", "mistral", "gemma3")
+FAST_TALKERS = ("gemma3:12b", "gemma3:4b", "llama3.2:3b", "llama3.2", "gemma3:4b", "llama3.1:8b", "qwen2.5:7b", "qwen2.5:3b", "mistral", "gemma3")
 _chat_cache: dict = {}
 
 

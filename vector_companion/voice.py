@@ -149,6 +149,12 @@ def respond(text: str, history: list[dict] | None = None) -> str:
     """Answer one thing you said: Vector's own commands (blackjack, fist bump...), then built-in skills
     (timer, list, weather, homework...), else the AI."""
     from . import brain
+    try:
+        q = quiz_route(text)
+    except Exception:  # noqa: BLE001
+        q = None
+    if q is not None:
+        return q
     action = vector_command(text)
     if action:
         return run_vector_command(action)
@@ -159,10 +165,45 @@ def respond(text: str, history: list[dict] | None = None) -> str:
     return brain.speakable(reply)
 
 
+QUIZ_START = re.compile(r"\bquiz me\b(?:\s+(?:on|about|in)\s+(.+))?|\b(?:give me|start) a quiz(?:\s+(?:on|about)\s+(.+))?", re.I)
+
+
+def game_state() -> dict:
+    from .companion_client import call
+    try:
+        return call("/health", timeout=2)
+    except Exception:  # noqa: BLE001
+        return {}
+
+
+def quiz_route(text: str) -> str | None:
+    """Starts a quiz, or hands an answer to the one that's running. None = not quiz related."""
+    from .companion_client import call
+    m = QUIZ_START.search(text)
+    if m:
+        topic = (m.group(1) or m.group(2) or "").strip(" .?!")
+        if not topic:
+            from .quiz import _load_misses
+            topic = "my mistakes" if _load_misses() else "AP Biology"
+        call("/quiz", {"topic": topic}, timeout=10)
+        return ""
+    if game_state().get("quiz"):
+        call("/quiz_answer", {"text": text}, timeout=10)
+        return ""
+    return None
+
+
 def respond_stream(text: str, history: list[dict] | None = None):
     """Like respond(), but AI answers come out sentence by sentence so he can start talking right away:
     the first sentence as soon as it's written, then the rest together."""
     from . import brain
+    try:
+        q = quiz_route(text)
+    except Exception:  # noqa: BLE001
+        q = None
+    if q is not None:
+        yield q
+        return
     action = vector_command(text)
     if action:
         yield run_vector_command(action)

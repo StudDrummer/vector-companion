@@ -190,17 +190,42 @@ class Blackjack:
         self.me: list = []
         self.active = False
         self.lock = threading.Lock()
+        self.current = None
+        self.show_until = 0.0
+        self.refresher = None
 
     def table(self, reveal: bool = False, banner: str = "", color=GREEN):
         me = self.me if reveal else [self.me[0], None]
         return face_art.blackjack(self.you, me, value(self.you), value(self.me) if reveal else None, banner, color)
 
     def present(self, text: str, reveal: bool = False, linger: float = 3.0, banner: str = "", color=GREEN):
-        """Cards on his face while he talks, then a few seconds more."""
+        """Cards on his face while he talks (kept there by _keep_table), then a few seconds more."""
+        self.current = self.table(reveal, banner, color)
+        self.show_until = time.time() + 600 if self.active else time.time() + 8
+        if not self.refresher:
+            self.refresher = threading.Thread(target=self._keep_table, daemon=True)
+            self.refresher.start()
         with self.c.control() as r:
-            self.c.put_screen(r, self.table(reveal, banner, color), 60)
+            self.c.put_screen(r, self.current, 5)
             self.c.speak(r, text)
-        self.c.ctl_last = time.time() + linger  # the table stays up; nothing waits on it
+        self.c.ctl_last = time.time() + linger
+
+    def _keep_table(self):
+        """His voice and idle face can paint over the screen, so keep re-sending the table while we play."""
+        raw_call = self.c.call
+        while time.time() < self.show_until and self.c.actions.bj is self:
+            try:
+                if self.c.has_control() and self.current is not None:
+                    from anki_vector import screen as scr
+                    data = scr.convert_image_to_screen_data(self.current.convert("RGB"))
+                    raw = self.c.raw
+                    raw_call(lambda: raw.screen.set_screen_with_image_data(data, 4, interrupt_running=False), 4,
+                             "keep_table", kill_link=False)
+                    self.c.ctl_last = time.time()
+            except Exception:  # noqa: BLE001
+                pass
+            time.sleep(2)
+        self.refresher = None
 
     def describe(self) -> str:
         """For "what's my card?" mid-game."""

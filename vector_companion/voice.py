@@ -172,16 +172,21 @@ def respond_stream(text: str, history: list[dict] | None = None):
         yield brain.speakable(reply)
         return
     msgs, _ = brain.build_messages((history or [])[-8:] + [{"role": "user", "content": text}])
+    msgs[0]["content"] += ("\nYou are speaking out loud right now: answer in at most two short sentences. "
+                           "Never make up what " + brain.OWNER + " is doing or has been doing.")
     buf, first_done = "", False
     for chunk in brain.stream_llm(msgs):
         buf += chunk
-        if not first_done:
-            m = re.search(r"^(.{12,}?[.!?])(\s+|$)", buf, re.S)
-            if m:
-                yield brain.speakable(m.group(1).strip())
-                buf, first_done = buf[m.end():], True
-    if buf.strip():
-        yield brain.speakable(buf.strip())
+        m = re.search(r"^(.{12,}?[.!?])(\s+)", buf, re.S)
+        if m:
+            yield brain.speakable(m.group(1).strip())
+            if first_done:
+                return  # two sentences is plenty out loud; don't wait for the rest
+            buf, first_done = buf[m.end():], True
+    rest = re.findall(r"[^.!?]+[.!?]+", buf.strip()) or ([buf.strip()] if buf.strip() else [])
+    rest = " ".join(x.strip() for x in rest[:1 if first_done else 2])  # two sentences out loud, max
+    if rest:
+        yield brain.speakable(rest)
     elif not first_done:
         yield "Sorry, I didn't catch that."
 

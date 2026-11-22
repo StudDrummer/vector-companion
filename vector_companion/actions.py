@@ -55,10 +55,11 @@ class Actions:
         self.bj: "Blackjack | None" = None
 
     def anim(self, key: str) -> str | None:
+        from .companion import play_trigger  # noqa: F811
         trig = self.c.find_trigger(*ANIMS.get(key, (key,)))
         if trig:
             with self.c.control() as r:
-                r.anim.play_animation_trigger(trig)
+                play_trigger(r, trig)
         return trig
 
     def say(self, text: str):
@@ -86,8 +87,9 @@ class Actions:
         if a == "trick":
             pool = [t for t in TRICKS if t in self.c.triggers] or [t for t in self.c.triggers if "Feedback" in t]
             trig = random.choice(pool)
+            from .companion import play_trigger
             with self.c.control() as r:
-                r.anim.play_animation_trigger(trig)
+                play_trigger(r, trig)
             return {"played": trig}
         if a in ("fist_bump", "love", "praise", "scold"):
             trig = self.anim(a)

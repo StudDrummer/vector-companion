@@ -53,6 +53,17 @@ DEFAULT_TIMEOUT = 10
 SAFE_STOP_MM = 60  # stop driving forward when something is closer than this
 
 
+def play_trigger(r, name: str):
+    """Play an animation trigger by name without the SDK first downloading his whole animation list
+    (that download times out over Wi-Fi, which made animations fail)."""
+    try:
+        from anki_vector.messaging import protocol
+        trig = protocol.AnimationTrigger(name=name)
+    except Exception:  # noqa: BLE001  (older SDKs: fall back to the name)
+        trig = name
+    return r.anim.play_animation_trigger(trig)
+
+
 class VectorOffline(RuntimeError):
     pass
 
@@ -451,7 +462,7 @@ class Companion:
         if safety()["dock_lock"] and any(w in trig for w in DRIVING_ANIMS):
             raise PermissionError(f"{trig} drives him around; it's blocked while the dock lock is on.")
         with self.control() as r:
-            r.anim.play_animation_trigger(trig)
+            play_trigger(r, trig)
         return trig
 
     def head(self, deg: float):
@@ -665,7 +676,7 @@ class Companion:
                 with self.control(wait=4) as r:
                     t = self.find_trigger("KnowledgeGraphSearchingGetIn")
                     if t:
-                        r.anim.play_animation_trigger(t)
+                        play_trigger(r, t)
             except Exception:  # noqa: BLE001
                 pass
             # No control held while the AI thinks: Vector stays fully usable.
@@ -676,7 +687,7 @@ class Companion:
                 with self.control() as r:
                     t = self.find_trigger("KnowledgeGraphSearchingGetOutSuccess")
                     if t:
-                        r.anim.play_animation_trigger(t)
+                        play_trigger(r, t)
                     self.show(face_art.check(), 1.2, with_control=r)
                     self.speak(r, res["say"])
             except Exception:  # noqa: BLE001
@@ -746,7 +757,7 @@ class Companion:
                     for name in ("TimerRing", "BlackJack_VictorWin"):
                         trig = self.find_trigger(name)
                         if trig:
-                            r.anim.play_animation_trigger(trig)
+                            play_trigger(r, trig)
                     self.show(face_art.check(), 2, with_control=r)
                     self.speak(r, f"Time's up {OWNER}! {total} minute{'s' if total != 1 else ''} done. "
                                   "Take a five minute break.")
@@ -792,7 +803,7 @@ class Companion:
                     self.show(face_art.heart(s), 0.35, with_control=r)
                 trig = self.find_trigger("PettingLevel4", "PettingLevel3", "Feedback_GoodRobot")
                 if trig:
-                    r.anim.play_animation_trigger(trig)
+                    play_trigger(r, trig)
             log("pet: hearts")
         except Exception as e:  # noqa: BLE001
             log(f"pet reaction skipped: {e}")
@@ -1022,7 +1033,7 @@ class Companion:
             with self.control(wait=4) as r:
                 trig = self.find_trigger("GreetAfterLongTime", "OnboardingReactToFaceHappy", "ReactToGreeting")
                 if trig and len(text) < 40:
-                    r.anim.play_animation_trigger(trig)
+                    play_trigger(r, trig)
                 self.speak(r, text)
             log(f"greet {name}: {text}")
         except Exception as e:  # noqa: BLE001

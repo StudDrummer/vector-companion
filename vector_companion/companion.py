@@ -131,6 +131,8 @@ class Companion:
         self.ctl_held = False
         self.ctl_last = 0.0
         self.hb_misses = 0
+        self.move_target: dict = {}
+        self.move_busy: dict = {}
         self.cube_pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix="vector-cube")
         self.stats = {"since": time.time(), "drops": [], "wake_words": [], "intents": [], "taps": 0}
         self.guard = None  # {"since": ts, "events": [...]} while desk guard is on
@@ -504,11 +506,14 @@ class Companion:
         try:
             if self.voice_engine() == "mac":
                 try:
+                    t0 = time.time()
                     path, secs = self._mac_wav(text)
+                    t_synth = time.time() - t0
                     self.speaking_until = time.time() + secs + 1
                     vol = max(0, min(100, int(S.load()["voice"].get("volume") or 80)))
                     raw = self.raw
                     self.call(lambda: raw.audio.stream_wav_file(path, vol), secs + 15, "stream_wav_file")
+                    log(f"speech timing: voice {t_synth:.1f}s, playback {time.time() - t0 - t_synth:.1f}s for {secs:.1f}s of audio")
                     return
                 except VectorOffline:
                     raise
@@ -546,14 +551,36 @@ class Companion:
             play_trigger(r, trig)
         return trig
 
-    def head(self, deg: float):
+    def head(self, deg: float, wait: bool = True):
+        if not wait:
+            return self._move_later("head", max(-22.0, min(45.0, float(deg))))
         from anki_vector.util import degrees
         with self.control() as r:
             r.behavior.set_head_angle(degrees(max(-22.0, min(45.0, float(deg)))))
 
-    def lift(self, height: float):
+    def lift(self, height: float, wait: bool = True):
+        if not wait:
+            return self._move_later("lift", max(0.0, min(1.0, float(height))))
         with self.control() as r:
-            r.behavior.set_lift_height(max(0.0, min(1.0, float(height))))
+            r.behavior.set_lift_height(max(0.0, min(1.0, float(height))), duration=0.6)
+
+    def _move_later(self, part: str, value: float):
+        """Slider moves from the app: answer at once, and if you drag fast only the latest position is used."""
+        self.move_target[part] = value
+        if not self.move_busy.get(part):
+            self.move_busy[part] = True
+            threading.Thread(target=self._move_worker, args=(part,), daemon=True).start()
+
+    def _move_worker(self, part: str):
+        try:
+            while part in self.move_target:
+                v = self.move_target.pop(part)
+                try:
+                    (self.head if part == "head" else self.lift)(v)
+                except Exception as e:  # noqa: BLE001
+                    log(f"{part} move failed: {e}")
+        finally:
+            self.move_busy[part] = False
 
     def capture(self) -> bytes:
         r = self.robot
@@ -796,7 +823,28 @@ class Companion:
         self.focus = {"end": time.time() + minutes * 60, "total": minutes, "id": fid, "goal": goal.strip(),
                       "start": time.time()}
         threading.Thread(target=self._focus_loop, args=(fid, minutes), daemon=True).start()
+        self._save_focus()
         return {k: v for k, v in self.focus.items() if k != "id"}
+
+    FOCUS_FILE = S.DATA_DIR / "focus.json"
+
+    def _save_focus(self):
+        try:
+            f = self.focus
+            self.FOCUS_FILE.write_text(json.dumps({k: v for k, v in f.items() if k != "id"} if f else {}))
+        except OSError:
+            pass
+
+    def resume_focus(self):
+        """A restart (update, crash, Mac sleep) shouldn't lose a study session that's still running."""
+        f = _load(self.FOCUS_FILE, {})
+        left = f.get("end", 0) - time.time()
+        if left > 30:
+            self.focus_id += 1
+            fid = self.focus_id
+            self.focus = {**f, "id": fid, "resumed": True}
+            threading.Thread(target=self._focus_loop, args=(fid, int(f.get("total", 25))), daemon=True).start()
+            log(f"resumed a focus timer with {int(left // 60)} min left")
 
     def stop_focus(self):
         f = self.focus
@@ -806,14 +854,19 @@ class Companion:
                 log_study(int(done), f.get("goal", ""), finished=False)
         self.focus = None
         self.focus_id += 1
+        self._save_focus()
 
     def _focus_loop(self, fid: int, total: int):
         goal = (self.focus or {}).get("goal", "")
         jarvis = S.load().get("persona", {}).get("style") == "jarvis"
         try:
+            if (self.focus or {}).get("resumed"):
+                raise StopIteration  # picked up after a restart: no new announcement
             with self.control() as r:
                 self.show(face_art.timer(total, total), 3, with_control=r)
                 self.speak(r, f"{total} minutes on {goal}. Go get it." if goal else f"{total} minute focus timer. Go get it.")
+        except StopIteration:
+            pass
         except Exception as e:  # noqa: BLE001
             log(f"focus start display failed: {e}")
         shown = total
@@ -844,6 +897,7 @@ class Companion:
         if not (self.focus and self.focus["id"] == fid):
             return
         self.focus = None
+        self._save_focus()
         if self.cube_connected:
             threading.Thread(target=self._cube_celebrate, daemon=True).start()
         for attempt in range(3):  # Wi-Fi blips shouldn't eat the end of a timer
@@ -1288,9 +1342,9 @@ class Handler(BaseHTTPRequestHandler):
             elif u.path == "/announce":
                 COMP.announce(str(b.get("text", ""))[:400], b.get("icon", "check"))
             elif u.path == "/head":
-                COMP.head(b.get("deg", 10))
+                COMP.head(b.get("deg", 10), wait=bool(b.get("wait", False)))
             elif u.path == "/lift":
-                COMP.lift(b.get("height", 0))
+                COMP.lift(b.get("height", 0), wait=bool(b.get("wait", False)))
             elif u.path == "/drive":
                 COMP.drive(b.get("lw", 0), b.get("rw", 0))
             elif u.path == "/stop":
@@ -1411,6 +1465,7 @@ def main():
     global COMP
     log("companion starting")
     COMP = Companion()
+    COMP.resume_focus()
     srv = ThreadingHTTPServer(("127.0.0.1", PORT), Handler)
     print(f"[companion] http://127.0.0.1:{PORT}")
     srv.serve_forever()

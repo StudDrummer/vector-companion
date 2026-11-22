@@ -564,15 +564,32 @@ class Companion:
             self.speak(r, text)
             self.show(img, 2.0, with_control=r)
 
+    STUCK_FILE = S.DATA_DIR / "stuck_animations.json"
+
     def find_trigger(self, *keywords: str) -> str | None:
+        """First trigger that exists, skipping any that have hung on him before."""
+        stuck = self.stuck_anims()
         for k in keywords:
-            if k in self.triggers:
+            if k in self.triggers and k not in stuck:
                 return k
         for k in keywords:
             for t in self.triggers:
-                if k.lower() in t.lower():
+                if k.lower() in t.lower() and t not in stuck:
                     return t
         return None
+
+    def stuck_anims(self) -> set:
+        if not hasattr(self, "_stuck"):
+            self._stuck = set(_load(self.STUCK_FILE, []))
+        return self._stuck
+
+    def note_stuck(self, trig: str):
+        self.stuck_anims().add(trig)
+        log(f"animation {trig} hung on him; won't use it again")
+        try:
+            self.STUCK_FILE.write_text(json.dumps(sorted(self._stuck)))
+        except OSError:
+            pass
 
     def anim(self, name: str):
         trig = name if name in self.triggers else self.find_trigger(name)

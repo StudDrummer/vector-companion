@@ -58,8 +58,14 @@ class Actions:
         from .companion import play_trigger  # noqa: F811
         trig = self.c.find_trigger(*ANIMS.get(key, (key,)))
         if trig:
-            with self.c.control() as r:
-                play_trigger(r, trig)
+            t0 = time.time()
+            try:
+                with self.c.control() as r:
+                    play_trigger(r, trig)
+            except Exception:
+                if time.time() - t0 > 15:  # it hung rather than failing fast: skip it from now on
+                    self.c.note_stuck(trig)
+                raise
         return trig
 
     def say(self, text: str):

@@ -258,10 +258,10 @@ def save_brain(body: dict) -> dict:
     return brain_settings()
 
 
-def restart_brain() -> bool:
+def restart_brain(service: str = "brain") -> bool:
     try:
         uid = os.getuid()
-        r = subprocess.run(["launchctl", "kickstart", "-k", f"gui/{uid}/com.rushil.vector-brain"],
+        r = subprocess.run(["launchctl", "kickstart", "-k", f"gui/{uid}/com.rushil.vector-{service}"],
                            capture_output=True, timeout=10)
         return r.returncode == 0
     except Exception:  # noqa: BLE001
@@ -510,6 +510,8 @@ class Handler(BaseHTTPRequestHandler):
                                    "brain": save_brain(b["brain"]) if "brain" in b else brain_settings()})
             if path == "/api/ears/restart":
                 return self._json({"ok": restart_ears()})
+            if path == "/api/companion_restart":
+                return self._json({"ok": restart_brain("companion")})
             if path == "/api/brain/restart":
                 return self._json({"ok": restart_brain()})
             if path == "/api/test_notify":

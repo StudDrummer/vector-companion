@@ -121,6 +121,7 @@ class Companion:
         self.guard = None  # {"since": ts, "events": [...]} while desk guard is on
         self.deaths: list[float] = []
         self.reserve = None  # second connection holding RESERVE_CONTROL: no idle wandering while docked
+        self.still_paused_until = 0.0  # built-in behaviors (actions, learn face) need the hold released
         self.cube_connected = False
         self._taps: list[float] = []
         for fn in (self._connect_loop, self._pet_loop, self._watch_loop, self._drive_loop):
@@ -220,7 +221,8 @@ class Companion:
 
     # ------------------------------------------------------------ keep him still while docked
     def _sync_reserve(self):
-        want = bool(safety().get("dock_lock")) and safety().get("keep_still", True) and self.connected
+        want = (bool(safety().get("dock_lock")) and safety().get("keep_still", True) and self.connected
+                and time.time() >= self.still_paused_until)
         if want and self.reserve is None:
             def hold():
                 from anki_vector.behavior import ReserveBehaviorControl
@@ -235,6 +237,18 @@ class Companion:
         elif not want and self.reserve is not None:
             self._drop_reserve()
             log("released: idle behaviors back on")
+
+    def pause_still(self, seconds: float) -> None:
+        """Release the hold so a built-in behavior can run; it comes back by itself afterwards."""
+        self.still_paused_until = max(self.still_paused_until, time.time() + max(5.0, min(float(seconds), 300)))
+        if self.reserve is not None:
+            rc, self.reserve = self.reserve, None
+            try:
+                self.call(lambda: rc.__exit__(None, None, None), 4, "release_reserve", kill_link=False)
+            except Exception:  # noqa: BLE001
+                pass
+            log(f"released the hold for {seconds:.0f} s so he can run a built-in behavior")
+        threading.Timer(self.still_paused_until - time.time() + 0.5, self._sync_reserve).start()
 
     def _drop_reserve(self):
         rc, self.reserve = self.reserve, None
@@ -1107,6 +1121,8 @@ class Handler(BaseHTTPRequestHandler):
                     threading.Thread(target=COMP._connect_cube, daemon=True).start()
                 else:
                     COMP.cube_color(b.get("color"), float(b.get("seconds", 3)))
+            elif u.path == "/still":
+                COMP.pause_still(float(b.get("pause", 45)))
             elif u.path == "/reconnect":
                 COMP.mark_dead("manual reconnect")
             else:

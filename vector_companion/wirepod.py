@@ -50,7 +50,16 @@ class Vector:
         self.serial = serial or os.environ.get("VECTOR_SERIAL") or self.discover_serial()
 
     # ---------- plumbing ----------
+    # built-in behaviors that can't run while the companion keeps him still on the dock
+    NEEDS_BEHAVIORS = {"cloud_intent": 45, "add_face": 60, "trigger_wake_word": 20}
+
     def _req(self, action: str, method: str = "POST", **params) -> str:
+        if action in self.NEEDS_BEHAVIORS:
+            try:  # let go of the "keep still" hold for a bit so the behavior can run
+                from .companion_client import call
+                call("/still", {"pause": self.NEEDS_BEHAVIORS[action]}, timeout=6)
+            except Exception:  # noqa: BLE001  (companion not running: nothing to release)
+                pass
         q = {"serial": self.serial or "", **{k: str(v) for k, v in params.items()}}
         full = f"{self.url}/api-sdk/{action}?{urllib.parse.urlencode(q)}"
         req = urllib.request.Request(full, method=method, data=b"" if method == "POST" else None)

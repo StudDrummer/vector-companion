@@ -34,6 +34,12 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from . import config, face_art, settings as S, vision
 
 config.load_env()
+os.environ.setdefault("GRPC_VERBOSITY", "ERROR")
+os.environ.setdefault("GRPC_ENABLE_FORK_SUPPORT", "0")
+import logging  # noqa: E402
+logging.basicConfig(level=logging.WARNING)
+for _name in ("anki_vector", "connection", "connection.Connection", "util", "util.AudioComponent", "grpc"):
+    logging.getLogger(_name).setLevel(logging.WARNING)
 PORT = int(os.environ.get("COMPANION_PORT", "47801"))
 WIREPOD = os.environ.get("WIREPOD_URL", "http://127.0.0.1:8080").rstrip("/")
 OWNER = os.environ.get("VECTOR_OWNER", "Rushil")
@@ -113,6 +119,8 @@ class Companion:
         self.audio_broken_until = 0.0
         self.stats = {"since": time.time(), "drops": [], "wake_words": [], "intents": [], "taps": 0}
         self.guard = None  # {"since": ts, "events": [...]} while desk guard is on
+        self.deaths: list[float] = []
+        self.reserve = None  # second connection holding RESERVE_CONTROL: no idle wandering while docked
         self.cube_connected = False
         self._taps: list[float] = []
         for fn in (self._connect_loop, self._pet_loop, self._watch_loop, self._drive_loop):
@@ -133,12 +141,13 @@ class Companion:
     def raw(self):
         return self._robot
 
-    def call(self, fn, timeout: float, name: str = "call"):
+    def call(self, fn, timeout: float, name: str = "call", kill_link: bool = True):
         fut = self.pool.submit(fn)
         try:
             return fut.result(timeout=timeout)
         except FutTimeout:
-            self.mark_dead(f"{name} got no answer in {timeout:.0f}s")
+            if kill_link:
+                self.mark_dead(f"{name} got no answer in {timeout:.0f}s")
             raise VectorOffline("Vector didn't answer. He may have dropped off Wi-Fi; reconnecting now.") from None
 
     def mark_dead(self, why: str):
@@ -147,6 +156,11 @@ class Companion:
             self.stats["drops"] = [t for t in self.stats["drops"] if time.time() - t < 86400] + [time.time()]
         self.cube_connected = False
         self.error = why
+        self.deaths = [t for t in self.deaths if time.time() - t < 120] + [time.time()]
+        # hung calls keep their worker threads busy; start a fresh pool so new commands aren't stuck behind them
+        old, self.pool = self.pool, ThreadPoolExecutor(max_workers=6, thread_name_prefix="vector-call")
+        old.shutdown(wait=False, cancel_futures=True)
+        self._drop_reserve()
         r, self._robot = self._robot, None
         if r is not None:
             threading.Thread(target=self._safe_disconnect, args=(r,), daemon=True).start()
@@ -159,9 +173,26 @@ class Companion:
         except Exception:  # noqa: BLE001
             pass
 
+    @staticmethod
+    def _fd_check():
+        """Safety net: if connections ever leak, restart cleanly (launchd brings us back) instead of dying slowly."""
+        try:
+            n = len(os.listdir("/dev/fd"))
+        except OSError:
+            return
+        if n > 700:
+            log(f"too many open connections ({n}); restarting the companion cleanly")
+            os._exit(3)
+
     def _connect_loop(self):
         while True:
+            self._fd_check()
             if self._robot is None:
+                if len([t for t in self.deaths if time.time() - t < 120]) >= 4:
+                    self.error = "connection keeps dropping; waiting 30 s before trying again"
+                    self._wake.wait(30)
+                    self._wake.clear()
+                    self.deaths = []
                 try:
                     self._connect()
                     self.error = None
@@ -169,6 +200,9 @@ class Companion:
                     threading.Thread(target=self._connect_cube, daemon=True).start()
                 except Exception as e:  # noqa: BLE001
                     self.error = f"{e.__class__.__name__}: {e}"[:200]
+                    if "Too many open files" in str(e):
+                        log("out of file handles; restarting the companion cleanly")
+                        os._exit(3)
                     self._wake.wait(5)
                     self._wake.clear()
                     continue
@@ -180,8 +214,32 @@ class Companion:
             except Exception as e:  # noqa: BLE001
                 self.mark_dead(f"heartbeat failed: {e}")
                 continue
+            self._sync_reserve()
             self._wake.wait(10)
             self._wake.clear()
+
+    # ------------------------------------------------------------ keep him still while docked
+    def _sync_reserve(self):
+        want = bool(safety().get("dock_lock")) and safety().get("keep_still", True) and self.connected
+        if want and self.reserve is None:
+            def hold():
+                from anki_vector.behavior import ReserveBehaviorControl
+                rc = ReserveBehaviorControl(self.serial, behavior_activation_timeout=8)
+                rc.__enter__()
+                return rc
+            try:
+                self.reserve = self.call(hold, 15, "reserve_control", kill_link=False)
+                log("holding him still on the dock (no idle wandering)")
+            except Exception as e:  # noqa: BLE001
+                log(f"couldn't reserve control: {e.__class__.__name__}")
+        elif not want and self.reserve is not None:
+            self._drop_reserve()
+            log("released: idle behaviors back on")
+
+    def _drop_reserve(self):
+        rc, self.reserve = self.reserve, None
+        if rc is not None:
+            threading.Thread(target=lambda: _quiet(rc.__exit__, None, None, None), daemon=True).start()
 
     def _connect(self):
         import anki_vector
@@ -812,9 +870,18 @@ class Companion:
 
     def _guard_loop(self, gid: int):
         from PIL import Image, ImageChops, ImageStat
-        prev, last_alert = None, 0.0
+        prev, last_alert, fails = None, 0.0, 0
         while self.guard and self.guard["id"] == gid:
-            time.sleep(1.2)
+            time.sleep(1.5)
+            if time.time() - self.guard["since"] > 12 * 3600:
+                log("desk guard: 12 hours up, turning it off")
+                self.stop_guard()
+                return
+            if fails >= 3:
+                log("desk guard paused: his camera isn't answering (he may be asleep)")
+                mac_notify("Vector desk guard", "Paused: his camera stopped answering. Turn it on again from the app.")
+                self.stop_guard()
+                return
             if not self.connected or time.time() < self.speaking_until:
                 prev = None
                 continue
@@ -824,8 +891,11 @@ class Companion:
                 if getattr(st, "are_motors_moving", False) or getattr(st, "is_animating", False):
                     prev = None  # he's moving his own head: not an intruder
                     continue
-                img = self.call(lambda: raw.camera.capture_single_image().raw_image, 10, "guard_capture")
+                img = self.call(lambda: raw.camera.capture_single_image().raw_image, 8, "guard_capture",
+                                kill_link=False)
+                fails = 0
             except VectorOffline:
+                fails += 1
                 prev = None
                 continue
             except Exception:  # noqa: BLE001
@@ -1044,6 +1114,13 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, {"ok": True})
         except Exception as e:  # noqa: BLE001
             return self._err(e)
+
+
+def _quiet(fn, *a):
+    try:
+        fn(*a)
+    except Exception:  # noqa: BLE001
+        pass
 
 
 def _safe(fn, *a):

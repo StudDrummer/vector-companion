@@ -46,6 +46,9 @@ cat > "$PLIST" <<EOF
 </dict></plist>
 EOF
 launchctl unload "$PLIST" 2>/dev/null || true
+for f in "$ROOT/logs/companion.out" "$ROOT/logs/ears.out" "$ROOT/logs/app.log"; do  # keep logs small
+  [[ -f "$f" && $(stat -f%z "$f" 2>/dev/null || echo 0) -gt 20000000 ]] && tail -c 2000000 "$f" > "$f.tmp" && mv "$f.tmp" "$f"
+done
 launchctl load "$PLIST"
 launchctl kickstart -k "gui/$(id -u)/com.rushil.vector-brain" 2>/dev/null || true
 echo "   companion running on http://127.0.0.1:47801 (brain restarted too)"

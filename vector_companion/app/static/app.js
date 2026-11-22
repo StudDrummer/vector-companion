@@ -75,7 +75,7 @@ function go(id) {
   $$(".page").forEach(p => p.classList.toggle("on", p.id === id));
   $$("#nav a").forEach(a => a.classList.toggle("on", a.dataset.go === id));
   if (hooks[id] && hooks[id][0]) hooks[id][0]();
-  if (id === "general") loadSafety();
+  if (id === "general") { loadSafety(); loadK("#general"); }
   $("#main").scrollTop = 0;
 }
 $$("[data-go]").forEach(a => a.addEventListener("click", () => go(a.dataset.go)));

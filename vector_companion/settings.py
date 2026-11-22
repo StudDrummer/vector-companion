@@ -34,7 +34,7 @@ DEFAULTS: dict = {
     },
     "quiet_hours": {"enabled": False, "start": "22:30", "end": "07:00"},
     "persona": {"style": "vector"},
-    "safety": {"dock_lock": True},
+    "safety": {"dock_lock": True, "keep_still": True},
     "companion": {"pet_hearts": True, "greetings": True, "morning_briefing": True,
                   "face_icons": True, "focus_minutes": 25, "focus_checkins": True,
                   "cube_button": True},

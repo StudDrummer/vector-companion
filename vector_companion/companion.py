@@ -122,6 +122,9 @@ class Companion:
         self.deaths: list[float] = []
         self.reserve = None  # second connection holding RESERVE_CONTROL: no idle wandering while docked
         self.still_paused_until = 0.0  # built-in behaviors (actions, learn face) need the hold released
+        self.mirror_on = False
+        self.mirror_thread = None
+        self.mirror_stop = threading.Event()
         self.cube_connected = False
         self._taps: list[float] = []
         for fn in (self._connect_loop, self._pet_loop, self._watch_loop, self._drive_loop):
@@ -238,9 +241,41 @@ class Companion:
             self._drop_reserve()
             log("released: idle behaviors back on")
 
+    # ------------------------------------------------------------ camera on his face
+    def start_mirror(self, seconds: float = 120) -> None:
+        """Show what his camera sees on his face. Needs control the whole time, so the companion holds it."""
+        self.stop_mirror()
+        self.mirror_stop = threading.Event()
+        self.mirror_thread = threading.Thread(target=self._mirror_loop, args=(min(float(seconds), 600),), daemon=True)
+        self.mirror_thread.start()
+
+    def stop_mirror(self) -> None:
+        self.mirror_stop.set()
+        t = self.mirror_thread
+        if t and t.is_alive() and t is not threading.current_thread():
+            t.join(timeout=8)
+
+    def _mirror_loop(self, seconds: float):
+        try:
+            with self.control(wait=8) as r:
+                self.mirror_on = True
+                r.vision.enable_display_camera_feed_on_face(True)
+                log("camera on his face")
+                end = time.time() + seconds
+                while time.time() < end and not self.mirror_stop.is_set() and self.connected:
+                    time.sleep(0.3)
+                try:
+                    r.vision.enable_display_camera_feed_on_face(False)
+                except Exception:  # noqa: BLE001
+                    pass
+        except Exception as e:  # noqa: BLE001
+            log(f"camera on face failed: {e}")
+        finally:
+            self.mirror_on = False
+
     def pause_still(self, seconds: float) -> None:
         """Release the hold so a built-in behavior can run; it comes back by itself afterwards."""
-        self.still_paused_until = max(self.still_paused_until, time.time() + max(5.0, min(float(seconds), 300)))
+        self.still_paused_until = max(self.still_paused_until, time.time() + max(5.0, min(float(seconds), 900)))
         if self.reserve is not None:
             rc, self.reserve = self.reserve, None
             try:
@@ -286,6 +321,8 @@ class Companion:
             self.o, self.wait = outer, wait
 
         def __enter__(self):
+            if self.o.mirror_on and threading.current_thread() is not self.o.mirror_thread:
+                self.o.mirror_stop.set()  # anything else he needs to do ends the camera-on-face mode
             if not self.o.lock.acquire(timeout=self.wait):
                 raise RuntimeError("Vector is busy with something else; try again in a moment.")
             try:
@@ -1043,6 +1080,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, {"connected": COMP.connected, "serial": COMP.serial, "error": COMP.error,
                                         "scanning": COMP.scanning, "triggers": len(COMP.triggers),
                                         "focus": {"left_s": int(f["end"] - time.time()), "total": f["total"]} if f else None,
+                                        "mirror": COMP.mirror_on, "holding_still": COMP.reserve is not None,
                                         "prefs": prefs(), "safety": safety(), "guard": bool(COMP.guard),
                                         "speaking": time.time() < COMP.speaking_until, "voice": COMP.voice_engine(),
                                         "cube": COMP.cube_connected})
@@ -1121,6 +1159,11 @@ class Handler(BaseHTTPRequestHandler):
                     threading.Thread(target=COMP._connect_cube, daemon=True).start()
                 else:
                     COMP.cube_color(b.get("color"), float(b.get("seconds", 3)))
+            elif u.path == "/mirror":
+                if b.get("on", True):
+                    COMP.start_mirror(float(b.get("seconds", 120)))
+                else:
+                    COMP.stop_mirror()
             elif u.path == "/still":
                 COMP.pause_still(float(b.get("pause", 45)))
             elif u.path == "/reconnect":

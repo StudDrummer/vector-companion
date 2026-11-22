@@ -94,8 +94,13 @@ class Ears:
         except Exception:  # noqa: BLE001  (first run: models not downloaded yet)
             self.setup()
             self.wake = self._wake_model()
-        from faster_whisper import WhisperModel
-        self.stt = WhisperModel(WHISPER, device="cpu", compute_type="int8")
+        self.stt = None  # loaded the first time the Mac does the listening itself
+
+    def _stt(self):
+        if self.stt is None:
+            from faster_whisper import WhisperModel
+            self.stt = WhisperModel(WHISPER, device="cpu", compute_type="int8")
+        return self.stt
 
     # ------------------------------------------------------------ audio
     def _callback(self, indata, frames, t, status):
@@ -147,7 +152,7 @@ class Ears:
     def transcribe(self, frames) -> str:
         import numpy as np
         audio = np.concatenate(frames).astype(np.float32) / 32768.0
-        segs, _ = self.stt.transcribe(audio, language="en", beam_size=1, vad_filter=False,
+        segs, _ = self._stt().transcribe(audio, language="en", beam_size=1, vad_filter=False,
                                       initial_prompt="Hey Jarvis, Vector, homework, focus timer, Claude.")
         text = " ".join(s.text for s in segs).strip()
         text = re.sub(r"^(hey,?\s+)?(jarvis|mycroft|alexa)[,.!]?\s*", "", text, flags=re.I).strip()
@@ -177,6 +182,31 @@ class Ears:
                 except Exception:  # noqa: BLE001
                     pass
             threading.Thread(target=show, daemon=True).start()
+
+    can_trigger: "bool | None" = None  # can WirePod start his listening directly? (developer robots only)
+
+    def hand_to_vector(self) -> bool:
+        """Best case, same as "Hey Vector": he lights up and listens with his own microphones. That needs a
+        developer-unlocked robot; on a regular Vector this returns False and the Mac listens instead,
+        then sends him the same built-in commands "Hey Vector" would (blackjack, fist bump, sleep...)."""
+        if self.can_trigger is False:
+            return False
+        from .wirepod import Vector
+        try:
+            v = Vector()
+            v.timeout = 4
+            out = v._req("trigger_wake_word")
+            if "success" not in out.lower():
+                raise RuntimeError(out[:80])
+            self.can_trigger = True
+            log("Hey Jarvis -> Vector is listening himself")
+            self.set(state="Vector is listening", last_text="(handed to Vector)")
+            self.vector_busy_until = time.time() + 12
+            return True
+        except Exception as e:  # noqa: BLE001
+            self.can_trigger = False
+            log(f"this Vector can't be woken remotely ({str(e)[:80]}); the Mac will listen instead")
+            return False
 
     def answer(self, text: str) -> None:
         from .voice import respond, speak
@@ -213,6 +243,11 @@ class Ears:
                 self.set(state="error", error=f"{e.__class__.__name__}: {e}"[:200])
                 log(f"mic error, retrying in 5 s: {e}")
                 time.sleep(5)
+                try:  # the input device changed (AirPods, sleep/wake): start the audio system fresh
+                    sd._terminate()
+                    sd._initialize()
+                except Exception:  # noqa: BLE001
+                    pass
 
     def _loop(self, np):
         levels: list[float] = []
@@ -259,9 +294,10 @@ class Ears:
             if score < 0.85 - 0.6 * sens:
                 continue
             self.set(wake_score=round(float(score), 2), heard=self.state["heard"] + 1, state="hearing you")
-            self.cue()
-            frames = self.record(wait_for_speech=4.0)
-            self.conversation(frames)
+            if not (p.get("mode", "vector") == "vector" and self.robot and self.hand_to_vector()):
+                self.cue()
+                frames = self.record(wait_for_speech=4.0)
+                self.conversation(frames)
             self.wake.reset()
             self.drain()
             self.set(state=f"listening for '{WAKE_WORDS[self.wake_word()]}'")

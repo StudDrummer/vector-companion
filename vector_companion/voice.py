@@ -9,6 +9,7 @@ handle the command and have Vector answer through the companion.
 from __future__ import annotations
 
 import json
+import re
 import os
 import sys
 import time
@@ -87,9 +88,76 @@ def speak(text: str) -> None:
 _speak = speak
 
 
+# Vector's own built-in voice commands (the same ones "Hey Vector" understands), matched on clean text.
+# Order matters: specific first. (pattern, intent, drives_him)
+VECTOR_COMMANDS = [
+    (r"\bblack ?jack\b|play (a )?(card )?game|play cards", "intent_play_blackjack", False),
+    (r"^(hit|hit me)$", "intent_blackjack_hit", False),
+    (r"^(stand|i'?ll stand|stay)$", "intent_blackjack_stand", False),
+    (r"\bfist ?bump", "intent_play_fistbump", False),
+    (r"\bdo a trick\b|something cool", "intent_play_anytrick", False),
+    (r"\bi love you\b", "intent_imperative_love", False),
+    (r"^(good (robot|boy|job)|well done|awesome|nice job)$", "intent_imperative_praise", False),
+    (r"^(bad robot|bad boy)$", "intent_imperative_abuse", False),
+    (r"^(volume up|louder|turn (it|the volume) up)$", "intent_imperative_volumeup", False),
+    (r"^(volume down|quieter|turn (it|the volume) down)$", "intent_imperative_volumedown", False),
+    (r"^(shut up)$", "intent_imperative_shutup", False),
+    (r"^(be quiet|quiet)$", "intent_imperative_quiet", False),
+    (r"\bhow old are you\b", "intent_character_age", False),
+    (r"\bwhat'?s my name\b|\bwho am i\b", "intent_names_ask", False),
+    (r"\bwhat time is it\b|what'?s the time", "intent_clock_time", False),
+    (r"^(go to sleep|sleep|take a nap)$", "intent_system_sleep", False),
+    (r"go (to your )?(home|charger)|go charge", "intent_system_charger", False),
+    (r"^(hello|hi|hey)( there| vector)?$", "intent_greeting_hello", False),
+    (r"^(goodbye|bye|see you)", "intent_greeting_goodbye", False),
+    (r"\bdance\b|boogie", "intent_imperative_dance", True),
+    (r"\blook at me\b", "intent_imperative_lookatme", True),
+    (r"\bcome (here|to me)\b", "intent_imperative_come", True),
+    (r"\b(fetch|bring me) (your |the )?cube", "intent_imperative_fetchcube", True),
+    (r"\bfind (your |the )?cube", "intent_imperative_findcube", True),
+    (r"\broll (your |the )?cube", "intent_play_rollcube", True),
+    (r"\bpick up (your |the )?cube", "intent_play_pickupcube", True),
+    (r"\bwheelie\b", "intent_play_popawheelie", True),
+    (r"\bkeep ?away\b", "intent_play_keepaway", True),
+    (r"\bexplore\b", "intent_explore_start", True),
+    (r"^(turn around)$", "intent_imperative_turnaround", True),
+    (r"^(turn left|go left)$", "intent_imperative_turnleft", True),
+    (r"^(turn right|go right)$", "intent_imperative_turnright", True),
+    (r"^(go forward|forward|move forward)$", "intent_imperative_forward", True),
+    (r"^(back up|go back|backwards?)$", "intent_imperative_backup", True),
+]
+
+
+def vector_command(text: str) -> tuple[str, bool] | None:
+    t = re.sub(r"[^a-z' ]", "", text.lower()).strip()
+    t = re.sub(r"^(can you|could you|please|vector|let'?s)\s+", "", t).strip()
+    t = re.sub(r"\s+please$", "", t)
+    for pat, intent, drives in VECTOR_COMMANDS:
+        if re.search(pat, t):
+            return intent, drives
+    return None
+
+
+def run_vector_command(intent: str, drives: bool) -> str:
+    """Do it exactly like "Hey Vector" would. Returns what to say ("" = he handles it himself)."""
+    if drives and S.load()["safety"].get("dock_lock"):
+        return "I have to stay on my charger until my new battery is in, so I can't move around yet."
+    from .wirepod import Vector
+    Vector().intent(intent)
+    S.log("voice", f"vector command: {intent}")
+    return ""
+
+
 def respond(text: str, history: list[dict] | None = None) -> str:
-    """Answer one thing you said: built-in skills first (timer, list, weather, homework...), else the AI."""
+    """Answer one thing you said: Vector's own commands (blackjack, fist bump...), then built-in skills
+    (timer, list, weather, homework...), else the AI."""
     from . import brain
+    cmd = vector_command(text)
+    if cmd:
+        try:
+            return run_vector_command(*cmd)
+        except Exception as e:  # noqa: BLE001
+            S.log("voice", f"vector command failed: {e}")
     reply = brain.local_skill(text)
     if reply is None:
         msgs, _ = brain.build_messages((history or [])[-8:] + [{"role": "user", "content": text}])

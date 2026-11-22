@@ -460,6 +460,9 @@ class Handler(BaseHTTPRequestHandler):
                 if action not in WP_ALLOWED:
                     return self._json({"error": "not allowed"}, 403)
                 params = {k: b[k] for k in WP_ALLOWED[action] if k in b}
+                if action == "mirror_mode":  # needs control held the whole time: the companion does it
+                    on = str(params.get("enable", "true")).lower() == "true"
+                    return self._json(cc.call("/mirror", {"on": on, "seconds": 300}, timeout=15))
                 if action == "cloud_intent":
                     name = params.get("intent", "")
                     if S.load()["safety"]["dock_lock"] and name in DOCK_BLOCKED:

@@ -51,13 +51,15 @@ class Vector:
 
     # ---------- plumbing ----------
     # built-in behaviors that can't run while the companion keeps him still on the dock
-    NEEDS_BEHAVIORS = {"cloud_intent": 45, "add_face": 60, "trigger_wake_word": 20}
+    # (seconds to let go: long enough for a question and its answer, or a whole game of blackjack)
+    NEEDS_BEHAVIORS = {"cloud_intent": 120, "add_face": 90, "trigger_wake_word": 150}
 
     def _req(self, action: str, method: str = "POST", **params) -> str:
         if action in self.NEEDS_BEHAVIORS:
+            secs = 600 if "blackjack" in str(params.get("intent", "")) else self.NEEDS_BEHAVIORS[action]
             try:  # let go of the "keep still" hold for a bit so the behavior can run
                 from .companion_client import call
-                call("/still", {"pause": self.NEEDS_BEHAVIORS[action]}, timeout=6)
+                call("/still", {"pause": secs}, timeout=6)
             except Exception:  # noqa: BLE001  (companion not running: nothing to release)
                 pass
         q = {"serial": self.serial or "", **{k: str(v) for k, v in params.items()}}

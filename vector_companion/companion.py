@@ -113,7 +113,7 @@ class Companion:
         self._robot = None
         self.serial = None
         self.lock = threading.RLock()
-        self.pool = ThreadPoolExecutor(max_workers=6, thread_name_prefix="vector-call")
+        self.pool = ThreadPoolExecutor(max_workers=12, thread_name_prefix="vector-call")
         self.error = "starting"
         self.triggers: list[str] = []
         self.last_greet: dict[str, float] = {}
@@ -130,6 +130,8 @@ class Companion:
         self.audio_broken_until = 0.0
         self.ctl_held = False
         self.ctl_last = 0.0
+        self.hb_misses = 0
+        self.cube_pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix="vector-cube")
         self.stats = {"since": time.time(), "drops": [], "wake_words": [], "intents": [], "taps": 0}
         self.guard = None  # {"since": ts, "events": [...]} while desk guard is on
         self.deaths: list[float] = []
@@ -162,14 +164,19 @@ class Companion:
     def raw(self):
         return self._robot
 
-    def call(self, fn, timeout: float, name: str = "call", kill_link: bool = True):
+    def call(self, fn, timeout: float, name: str = "call", kill_link: bool = False):
+        """Run one robot call with a time limit. A slow call only fails itself; deciding that the whole
+        link is dead is the heartbeat's job (tearing everything down on one slow call caused reconnect storms)."""
         fut = self.pool.submit(fn)
         try:
             return fut.result(timeout=timeout)
         except FutTimeout:
             if kill_link:
                 self.mark_dead(f"{name} got no answer in {timeout:.0f}s")
-            raise VectorOffline("Vector didn't answer. He may have dropped off Wi-Fi; reconnecting now.") from None
+                raise VectorOffline("Vector didn't answer. He may have dropped off Wi-Fi; reconnecting now.") from None
+            log(f"slow: {name} took over {timeout:.0f}s")
+            self._wake.set()  # check the link now instead of in 10 s
+            raise VectorOffline(f"Vector was slow to answer ({name}). Try again in a moment.") from None
 
     def mark_dead(self, why: str):
         if self._robot is not None:
@@ -180,7 +187,7 @@ class Companion:
         self.error = why
         self.deaths = [t for t in self.deaths if time.time() - t < 120] + [time.time()]
         # hung calls keep their worker threads busy; start a fresh pool so new commands aren't stuck behind them
-        old, self.pool = self.pool, ThreadPoolExecutor(max_workers=6, thread_name_prefix="vector-call")
+        old, self.pool = self.pool, ThreadPoolExecutor(max_workers=12, thread_name_prefix="vector-call")
         old.shutdown(wait=False, cancel_futures=True)
         self._drop_reserve()
         r, self._robot = self._robot, None
@@ -230,11 +237,17 @@ class Companion:
                     continue
             # heartbeat
             try:
-                self.call(lambda: self._robot.get_battery_state(), 6, "heartbeat")
-            except VectorOffline:
-                continue
+                r = self._robot
+                self.call(lambda: r.get_battery_state(), 6, "heartbeat")
+                self.hb_misses = 0
             except Exception as e:  # noqa: BLE001
-                self.mark_dead(f"heartbeat failed: {e}")
+                self.hb_misses += 1
+                if self.hb_misses >= 2:  # two misses in a row: the link really is gone
+                    self.hb_misses = 0
+                    self.mark_dead(f"heartbeat failed twice: {str(e)[:80]}")
+                    continue
+                self._wake.wait(2)
+                self._wake.clear()
                 continue
             self._sync_reserve()
             self._wake.wait(10)
@@ -929,7 +942,7 @@ class Companion:
         try:
             raw = self.raw
             with self.control(wait=6):
-                self.call(lambda: raw.world.connect_cube(), 25, "connect_cube")
+                self.cube_pool.submit(raw.world.connect_cube).result(timeout=25)
             cube = raw.world.connected_light_cube
             self.cube_connected = bool(cube and cube.is_connected)
             if self.cube_connected:
@@ -946,10 +959,10 @@ class Companion:
             if not cube or not cube.is_connected:
                 return
             if color is None:
-                self.call(lambda: cube.set_lights_off(), 4, "cube_off")
+                self.cube_pool.submit(cube.set_lights_off).result(timeout=8)
             else:
                 light = getattr(lights, f"{color}_light", lights.white_light)
-                self.call(lambda: cube.set_lights(light), 4, "cube_lights")
+                self.cube_pool.submit(cube.set_lights, light).result(timeout=8)
                 if seconds:
                     threading.Timer(seconds, lambda: self.cube_color(None) if not self.focus else None).start()
         except Exception:  # noqa: BLE001
@@ -1033,7 +1046,10 @@ class Companion:
         prev, last_alert, fails = None, 0.0, 0
         while self.guard and self.guard["id"] == gid:
             time.sleep(1.5)
-            if time.time() - self.guard["since"] > 12 * 3600:
+            g = self.guard
+            if not g or g["id"] != gid:
+                return
+            if time.time() - g["since"] > 12 * 3600:
                 log("desk guard: 12 hours up, turning it off")
                 self.stop_guard()
                 return
@@ -1236,7 +1252,11 @@ class Handler(BaseHTTPRequestHandler):
             if u.path == "/sensors":
                 return self._send(200, COMP.sensors())
             if u.path == "/map.png":
-                return self._send(200, COMP.map_png(), "image/png")
+                try:
+                    png = COMP.call(COMP.map_png, 4, "map")
+                except Exception:  # noqa: BLE001  (no map until he drives around)
+                    png = _no_map_png()
+                return self._send(200, png, "image/png")
             if u.path == "/capture":
                 return self._send(200, COMP.capture(), "image/jpeg")
             if u.path == "/anims":
@@ -1352,6 +1372,25 @@ def log_study(minutes: int, goal: str = "", finished: bool = True) -> int:
 
 def study_today() -> int:
     return int(_load(STUDY_LOG, {}).get(datetime.now().strftime("%Y-%m-%d"), {}).get("minutes", 0))
+
+
+_NO_MAP = None
+
+
+def _no_map_png() -> bytes:
+    global _NO_MAP
+    if _NO_MAP is None:
+        from PIL import Image, ImageDraw
+        im = Image.new("RGB", (360, 360), (28, 28, 30))
+        d = ImageDraw.Draw(im)
+        f = face_art._font(17)
+        for i, line in enumerate(("No map yet", "He maps your desk as he drives.", "Driving is off until his new battery.")):
+            w = d.textlength(line, font=f)
+            d.text(((360 - w) / 2, 150 + i * 26), line, fill=(235, 235, 240) if i == 0 else (150, 150, 158), font=f)
+        buf = io.BytesIO()
+        im.save(buf, "PNG")
+        _NO_MAP = buf.getvalue()
+    return _NO_MAP
 
 
 def _quiet(fn, *a):

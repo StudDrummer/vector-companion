@@ -47,6 +47,9 @@ class Ears:
         self.history: list[dict] = []
         self.history_at = 0.0
         self.vector_busy_until = 0.0
+        self.last_spoke = 0.0
+        self.game = False
+        self.handed_off = False
         self.noise = 200.0
 
     _prefs = (0.0, {})
@@ -135,6 +138,10 @@ class Ears:
                 f = self.frame()
             except queue.Empty:
                 continue
+            if self.robot and time.time() < self.vector_busy_until:
+                # that's Vector talking, not you: throw it away and give you the full window afterwards
+                frames, started, quiet, t0 = [], False, 0, time.time()
+                continue
             loud = self.rms(f) > talk
             if not started:
                 if loud:
@@ -168,11 +175,14 @@ class Ears:
         from .companion_client import call
         while True:
             try:
-                if call("/health", timeout=2).get("speaking"):
+                h = call("/health", timeout=2)
+                self.game = bool(h.get("quiz") or h.get("blackjack"))
+                if h.get("speaking"):
                     self.vector_busy_until = time.time() + 0.8
+                    self.last_spoke = time.time()
             except Exception:  # noqa: BLE001
                 pass
-            time.sleep(0.5)
+            time.sleep(0.25)
 
     def cue(self):
         if self.prefs()["ears"].get("chime", True):
@@ -250,6 +260,7 @@ class Ears:
                 else:
                     print("   reply:", part)
         reply = " ".join(p for p in parts if p).strip()
+        self.handed_off = not reply  # an action/game/quiz will talk by itself in a moment
         self.history += [{"role": "user", "content": text}, {"role": "assistant", "content": reply or "(done)"}]
         self.history_at = time.time()
         self.vector_busy_until = time.time() + 0.8
@@ -361,15 +372,18 @@ class Ears:
             turns += 1
             if not self.prefs()["ears"].get("follow_up", True):
                 break
-            # follow-up without the wake word: wait until he's done talking, then listen a few seconds
-            time.sleep(1.5)  # actions start talking a moment later; don't hear him as you
+            # follow-up without the wake word. Actions (dealing cards, the next quiz question) start talking a few
+            # seconds later, so wait for him to start, then to finish, then listen.
+            asked = time.time()
+            while self.robot and self.handed_off and time.time() - asked < 8 and self.last_spoke < asked:
+                time.sleep(0.1)
             while time.time() < self.vector_busy_until:
                 time.sleep(0.1)
             self.drain()
             self.set(state="listening for a follow-up")
-            from .voice import game_state
-            g = game_state()  # in a quiz or a game you get longer to answer
-            frames = self.record(wait_for_speech=15.0 if (g.get("quiz") or g.get("blackjack")) else 5.0)
+            window = 30.0 if self.game else 6.0  # in a quiz or a game you get longer to answer
+            frames = self.record(wait_for_speech=window)
+            log("follow-up: " + ("heard something" if frames else f"nothing in {window:.0f}s, back to 'Hey Jarvis'"))
 
 
 def main(argv: list[str]) -> None:

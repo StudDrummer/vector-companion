@@ -94,6 +94,7 @@ VECTOR_COMMANDS = [
     (r"\bblack ?jack\b|play (a )?(card )?game|play cards|deal me in", "blackjack"),
     (r"^(hit|hit me|another( card)?|one more( card)?)$", "bj_hit"),
     (r"^(stand|i'?ll stand|stay|i'?m good|hold)$", "bj_stand"),
+    (r"^(stop|quit|end|i'?m done|no more)( the| this)?( game| playing| blackjack)?$|stop playing|quit the game", "bj_quit"),
     (r"what'?s my (card|cards|hand|score|total)|what (do|did) i (have|get)|what are my cards", "bj_status"),
     (r"\bfist ?bump", "fist_bump"),
     (r"\bdo a trick\b|something cool|show me a trick", "trick"),

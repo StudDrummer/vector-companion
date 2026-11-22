@@ -36,7 +36,7 @@ TRICKS = ("Sneeze", "Feedback_ILoveYou", "FistBumpSuccess", "BlackJack_VictorWin
 
 # what each app/voice action does; "drives" ones are refused while the dock lock is on
 CATALOG = {
-    "blackjack": "Play blackjack", "bj_hit": "Hit", "bj_stand": "Stand", "fist_bump": "Fist bump",
+    "blackjack": "Play blackjack", "bj_hit": "Hit", "bj_stand": "Stand", "bj_quit": "Stop the game", "fist_bump": "Fist bump",
     "trick": "Do a trick", "love": "I love you", "praise": "Good robot", "scold": "Bad robot",
     "hello": "Say hi", "goodbye": "Goodbye", "time": "What time is it", "age": "How old are you",
     "name": "What's my name", "sleep": "Go to sleep", "go_to_charger": "Go home", "take_photo": "Take a photo",
@@ -78,6 +78,10 @@ class Actions:
             self.bj = Blackjack(self)
             threading.Thread(target=self.bj.deal, daemon=True).start()
             return {"started": "blackjack"}
+        if a == "bj_quit":
+            if self.bj and self.bj.active:
+                self.bj.abandon("Okay, game over.")
+            return {}
         if a == "bj_status":
             self.say(self.bj.describe() if self.bj else "We're not in a game. Say play blackjack to start one.")
             return {}
@@ -160,6 +164,8 @@ class Actions:
         return {"saved": str(path)}
 
 
+IDLE_GAME_S = 75  # a hand nobody touches for this long ends by itself
+
 RANKS = ["A", "2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K"]
 NAMES = {"A": "an ace", "J": "a jack", "Q": "a queen", "K": "a king", "8": "an 8"}
 
@@ -197,6 +203,7 @@ class Blackjack:
         self.current = None
         self.show_until = 0.0
         self.refresher = None
+        self.last_input = time.time()
 
     def table(self, reveal: bool = False, banner: str = "", color=GREEN):
         me = self.me if reveal else [self.me[0], None]
@@ -218,6 +225,9 @@ class Blackjack:
         """His voice and idle face can paint over the screen, so keep re-sending the table while we play."""
         raw_call = self.c.call
         while time.time() < self.show_until and self.c.actions.bj is self:
+            if self.active and time.time() - self.last_input > IDLE_GAME_S:
+                self.abandon("We'll finish this hand later.")
+                break
             try:
                 if self.c.has_control() and self.current is not None:
                     from anki_vector import screen as scr
@@ -230,6 +240,15 @@ class Blackjack:
                 pass
             time.sleep(0.8)  # faster than his eye animation can take the screen back
         self.refresher = None
+
+    def abandon(self, line: str = ""):
+        """End the game without a result (nobody answered, or you said stop) and give him his face back."""
+        self.active = False
+        self.show_until = 0.0
+        self.current = None
+        self.c.ctl_last = 0.0  # let the companion hand control back right away
+        if line:
+            threading.Thread(target=lambda: self.a.say(line), daemon=True).start()
 
     def describe(self) -> str:
         """For "what's my card?" mid-game."""
@@ -253,6 +272,7 @@ class Blackjack:
                 self._finish("Blackjack! You win.", "lose")
 
     def hit(self):
+        self.last_input = time.time()
         with self.lock:
             if not self.active:
                 return
@@ -268,6 +288,7 @@ class Blackjack:
                 self.present(f"{spoken(card).capitalize()}. You're at {y}. Hit or stand?")
 
     def stand(self):
+        self.last_input = time.time()
         with self.lock:
             if self.active:
                 self._dealer()

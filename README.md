@@ -205,9 +205,9 @@ Settings (wake word: Hey Jarvis / Hey Mycroft / Alexa, sensitivity, follow-ups, 
   Set the place on the Personality page.
 - **Hearing & Wi-Fi** (Diagnostics): how often he dropped off Wi-Fi and how often he heard "Hey Vector".
 
-The brain talks with a fast model (llama3.2:3b) even if you picked a "thinking" model like qwen3-vl:
-those spend their answer budget thinking and return nothing. Thinking models are still used for
-homework photos, where the reasoning helps.
+The local model is **gemma3:4b**: it answers in about half a second and also reads homework photos
+(about 4 seconds). If you pick a "thinking" model like qwen3-vl, he still talks with a fast one, because
+thinking models spend their answer budget thinking and return nothing.
 
 ### Smarter announcements
 When Claude Code finishes, Vector reads Claude's final message and says what it did, where:

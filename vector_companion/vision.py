@@ -95,7 +95,7 @@ def pick_backend() -> tuple[str, str, str, str]:
     if m:
         return "ollama", m, "", ""
     raise RuntimeError("No vision AI available. Add a Claude, ChatGPT or Gemini key in the Vector app (Brain), "
-                       "or run: ollama pull qwen2.5vl:7b")
+                       "or run: ollama pull gemma3:4b")
 
 
 def _post(url: str, body: dict, headers: dict, timeout: float = 120) -> dict:

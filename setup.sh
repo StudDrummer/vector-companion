@@ -63,9 +63,9 @@ if ! command -v ollama >/dev/null 2>&1 && [[ -n "$BREW" ]]; then
   export PATH="$(dirname "$BREW"):$PATH"
 fi
 if command -v ollama >/dev/null 2>&1; then
-  ollama pull llama3.2:3b || warn "ollama pull failed. Is the Ollama app running?"
+  ollama pull gemma3:4b || warn "ollama pull failed. Is the Ollama app running?"
 else
-  warn "Ollama not found. Install from https://ollama.com, then run: ollama pull llama3.2:3b"
+  warn "Ollama not found. Install from https://ollama.com, then run: ollama pull gemma3:4b"
   warn "(or set BRAIN_BACKEND=anthropic and ANTHROPIC_API_KEY in .env to use Claude)"
 fi
 

@@ -86,10 +86,10 @@ if command -v claude >/dev/null 2>&1; then
   claude mcp add --scope user vector -- "$PY" -m vector_companion.mcp_server >/dev/null && echo "   Claude Code: updated"
 fi
 
-step "Fast talking model"
+step "Local AI model (talks and sees)"
 if command -v ollama >/dev/null 2>&1; then
-  if ollama list 2>/dev/null | grep -q "^llama3.2:3b"; then echo "   llama3.2:3b ready (answers in 1-2 s)"
-  else ollama pull llama3.2:3b && echo "   llama3.2:3b installed"; fi
+  if ollama list 2>/dev/null | grep -q "^gemma3:4b"; then echo "   gemma3:4b ready (answers in under a second, reads homework photos)"
+  else ollama pull gemma3:4b && echo "   gemma3:4b installed"; fi
 fi
 
 step "Vector app"

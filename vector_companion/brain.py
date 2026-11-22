@@ -52,7 +52,7 @@ MEMORY_FILE = DATA_DIR / "memory.json"
 TODO_FILE = DATA_DIR / "todo.json"
 
 DEFAULT_MODELS = {
-    "ollama": "llama3.2:3b",
+    "ollama": "gemma3:4b",  # fast, accurate, and can see
     "anthropic": "claude-haiku-5-5",
     "openai": "gpt-5.5",
 }
@@ -436,7 +436,7 @@ def _scan_mode(t: str) -> str | None:
 
 # ------------------------------------------------------------------ LLM backends
 def _model() -> str:
-    m = MODEL or DEFAULT_MODELS.get(BACKEND, "llama3.2:3b")
+    m = MODEL or DEFAULT_MODELS.get(BACKEND, "gemma3:4b")
     return chat_model(m) if BACKEND == "ollama" else m
 
 

@@ -411,7 +411,7 @@ async function providerUI(current) {
   }
   let models = [];
   try { models = await api("/api/models?provider=" + p); } catch { }
-  if (!models.length) models = p === "ollama" ? ["llama3.2:3b"] : p === "chatgpt" ? ["gpt-5.5"] : p === "gemini" ? ["(save your key to load models)"] : [];
+  if (!models.length) models = p === "ollama" ? ["gemma3:4b"] : p === "chatgpt" ? ["gpt-5.5"] : p === "gemini" ? ["(save your key to load models)"] : [];
   $("#model").innerHTML = models.map(m => `<option>${esc(m)}</option>`).join("");
   if (current && models.includes(current)) $("#model").value = current;
 }

@@ -239,6 +239,11 @@ fi
 chmod +x "$EARS/Contents/MacOS/VectorEars"
 codesign --force --deep --sign - "$EARS" >/dev/null 2>&1 || true
 rm -rf "$TMP"
+# swap in the new Ears (menu bar mic switch) right away
+pkill -x VectorEars 2>/dev/null || true
+pkill -f "vector_companion.ears" 2>/dev/null || true
+sleep 1
+open -g "$EARS" 2>/dev/null && echo "   Vector Ears is in your menu bar (mic icon). Control-Option-J turns the mic on/off." || true
 touch "$APP"  # refresh Finder/Dock icon cache
 
 echo

@@ -45,7 +45,11 @@ WIREPOD = os.environ.get("WIREPOD_URL", "http://127.0.0.1:8080").rstrip("/")
 OWNER = os.environ.get("VECTOR_OWNER", "Rushil")
 
 # per-call time limits (seconds); anything slower means the link is gone
-TIMEOUTS = {"say_text": 45, "play_animation_trigger": 30, "drive_on_charger": 45, "drive_off_charger": 30,
+# An action that hangs (e.g. an animation waiting for something that never happens) blocks every later
+# action in his queue. After one of these times out, we hand control back, which clears his queue.
+QUEUED_ACTIONS = {"play_animation_trigger", "play_animation", "set_lift_height", "set_head_angle", "say_text",
+                  "drive_straight", "turn_in_place", "drive_on_charger"}
+TIMEOUTS = {"say_text": 45, "play_animation_trigger": 15, "drive_on_charger": 45, "drive_off_charger": 30,
             "capture_single_image": 12, "request_control": 8, "release_control": 5,
             "set_screen_with_image_data": 6, "get_battery_state": 6, "connect": 20, "drive_straight": 20,
             "turn_in_place": 20}
@@ -61,7 +65,11 @@ def play_trigger(r, name: str):
         trig = protocol.AnimationTrigger(name=name)
     except Exception:  # noqa: BLE001  (older SDKs: fall back to the name)
         trig = name
-    return r.anim.play_animation_trigger(trig)
+    # He stays docked (dock lock), so never let an animation spin his wheels on the charger.
+    try:
+        return r.anim.play_animation_trigger(trig, ignore_body_track=True)
+    except TypeError:
+        return r.anim.play_animation_trigger(trig)
 
 
 class VectorOffline(RuntimeError):
@@ -131,6 +139,7 @@ class Companion:
         self.ctl_held = False
         self.ctl_last = 0.0
         self.hb_misses = 0
+        self.unstick = False
         self.move_target: dict = {}
         self.move_busy: dict = {}
         self.cube_pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix="vector-cube")
@@ -177,6 +186,8 @@ class Companion:
                 self.mark_dead(f"{name} got no answer in {timeout:.0f}s")
                 raise VectorOffline("Vector didn't answer. He may have dropped off Wi-Fi; reconnecting now.") from None
             log(f"slow: {name} took over {timeout:.0f}s")
+            if name in QUEUED_ACTIONS:
+                self.unstick = True
             self._wake.set()  # check the link now instead of in 10 s
             raise VectorOffline(f"Vector was slow to answer ({name}). Try again in a moment.") from None
 
@@ -382,7 +393,11 @@ class Companion:
 
         def __exit__(self, *exc):
             self.o.ctl_last = time.time()  # released by _release_loop after a quiet moment, not right away
-            self.o.lock.release()
+            try:
+                if self.o.unstick:
+                    self.o._clear_queue()
+            finally:
+                self.o.lock.release()
             return False
 
     CONTROL_IDLE = 15.0  # seconds of quiet before handing his body back to him
@@ -394,6 +409,24 @@ class Companion:
             return bool(self._robot.conn._control_events.has_control)
         except Exception:  # noqa: BLE001
             return self.ctl_held
+
+    def _clear_queue(self):
+        """Something got stuck. Cancel what we sent and hand control back once, which makes him drop
+        the stuck action, so the next command runs at once instead of waiting behind it."""
+        self.unstick = False
+        r = self._robot
+        if r is None:
+            return
+        try:
+            r.conn._cancel_active()
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            self.call(lambda: r.conn.release_control(timeout=4), 6, "release_control")
+        except Exception:  # noqa: BLE001
+            pass
+        self.ctl_held = False
+        log("cleared a stuck action")
 
     def release_now(self):
         """Hand his body back immediately instead of after the idle timeout."""

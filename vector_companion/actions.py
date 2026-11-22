@@ -19,7 +19,7 @@ GREEN, RED, GOLD, WHITE, BLUE = (48, 215, 75), (255, 69, 58), (255, 214, 10), (2
 
 # safe on the dock: no wheels. First trigger name that exists wins (exact, then substring).
 ANIMS = {
-    "fist_bump": ("FistBumpRequestOnce", "FistBumpSuccess", "FistBump"),
+    "fist_bump": ("FistBumpSuccess", "FistBump"),  # not FistBumpRequestOnce: it waits for a real bump
     "love": ("Feedback_ILoveYou", "ILoveYou"),
     "praise": ("Feedback_GoodRobot", "GoodRobot"),
     "scold": ("Feedback_BadRobot", "BadRobot", "MeanWords"),

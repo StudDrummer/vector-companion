@@ -1327,10 +1327,13 @@ class Handler(BaseHTTPRequestHandler):
                 f = COMP.focus
                 return self._send(200, {"connected": COMP.connected, "serial": COMP.serial, "error": COMP.error,
                                         "scanning": COMP.scanning, "triggers": len(COMP.triggers),
-                                        "focus": {"left_s": int(f["end"] - time.time()), "total": f["total"]} if f else None,
+                                        "focus": {"left_s": int(f["end"] - time.time()), "total": f["total"], "goal": f.get("goal", "")} if f else None,
                                         "mirror": COMP.mirror_on, "holding_still": COMP.reserve is not None,
                                         "quiz": bool(COMP.quiz and COMP.quiz.active),
+                                        "quiz_state": ({"q": COMP.quiz.i + 1, "of": len(COMP.quiz.qs), "score": COMP.quiz.score,
+                                                        "topic": COMP.quiz.topic} if COMP.quiz and COMP.quiz.active else None),
                                         "blackjack": bool(COMP.actions.bj and COMP.actions.bj.active),
+                                        "game": COMP.actions.bj.state() if COMP.actions.bj else None,
                                         "prefs": prefs(), "safety": safety(), "guard": bool(COMP.guard),
                                         "speaking": time.time() < COMP.speaking_until, "voice": COMP.voice_engine(),
                                         "cube": COMP.cube_connected})

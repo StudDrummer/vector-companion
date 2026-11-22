@@ -204,6 +204,9 @@ class Blackjack:
         self.show_until = 0.0
         self.refresher = None
         self.last_input = time.time()
+        self.ended_at = 0.0
+        self.result = None
+        self.you, self.me = [], []
 
     def table(self, reveal: bool = False, banner: str = "", color=GREEN):
         me = self.me if reveal else [self.me[0], None]
@@ -259,6 +262,7 @@ class Blackjack:
 
     def deal(self):
         with self.lock:
+            self.result = None
             self.you = [self.deck.pop(), self.deck.pop()]
             self.me = [self.deck.pop(), self.deck.pop()]
             self.active = True
@@ -310,8 +314,18 @@ class Blackjack:
         else:
             self._finish(" ".join(line) + " It's a tie.", "push")
 
+    def state(self) -> dict | None:
+        """What the app shows: your cards, his up card, and how the last hand ended (for 20 s)."""
+        if not (self.active or time.time() - self.ended_at < 20):
+            return None
+        return {"active": self.active, "you": [spoken(c) for c in self.you], "you_total": value(self.you),
+                "me": [spoken(c) for c in (self.me if not self.active else self.me[:1])],
+                "me_total": value(self.me) if not self.active else None, "result": self.result}
+
     def _finish(self, text: str, outcome: str):
         self.active = False
+        self.ended_at = time.time()
+        self.result = {"win": "Vector wins", "lose": "You win", "push": "Push"}.get(outcome, outcome)
         if self.c.cube_connected:
             self.c.cube_color({"win": "red", "lose": "green"}.get(outcome, "yellow"), 5)
         banner, color = {"win": ("VECTOR WINS", RED), "lose": ("YOU WIN!", GREEN)}.get(outcome, ("PUSH", GOLD))

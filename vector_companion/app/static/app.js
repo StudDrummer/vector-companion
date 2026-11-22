@@ -206,13 +206,14 @@ $("#tiles").innerHTML = TILES.map(([k, l, i, c, drives]) =>
 $$(".tile").forEach(t => t.addEventListener("click", async () => {
   t.classList.add("busy"); setTimeout(() => t.classList.remove("busy"), 1600);
   await intent(t.dataset.a, t.querySelector("b").textContent);
-  if (t.dataset.a === "blackjack") $("#bj").classList.add("on");
+  if (t.dataset.a === "blackjack") { $("#bj").classList.add("on"); setTimeout(syncLive, 600); }
+  else setTimeout(syncLive, 400);
 }));
 $("#quiz-go").addEventListener("click", () => tryApi("/api/quiz", { topic: $("#quiz-topic").value.trim() || "my mistakes" }, "Making your quiz..."));
-$("#study-go").addEventListener("click", async () => { await tryApi("/api/companion/focus", { minutes: 25, goal: $("#study-goal").value.trim() }, "Study session started"); });
+$("#study-go").addEventListener("click", async () => { await tryApi("/api/companion/focus", { minutes: 25, goal: $("#study-goal").value.trim() }, "Study session started"); syncLive(); });
 async function loadStudy() { try { const s = await api("/api/study"); $("#study-today").textContent = s.today ? `${s.today} min` : "Nothing yet"; } catch { } }
-$("#bj-hit").addEventListener("click", () => intent("bj_hit", "Hit"));
-$("#bj-stand").addEventListener("click", () => intent("bj_stand", "Stand"));
+$("#bj-hit").addEventListener("click", async () => { await intent("bj_hit", "Hit"); syncLive(); });
+$("#bj-stand").addEventListener("click", async () => { await intent("bj_stand", "Stand"); syncLive(); });
 $$("[data-intent]").forEach(b => b.addEventListener("click", () => intent(b.dataset.intent, b.textContent.trim())));
 $("#qa-listen").addEventListener("click", () => go("jarvis"));
 $("#qa-study").addEventListener("click", () => tryApi("/api/companion/focus", { minutes: 25 }, "25 minute study session started"));
@@ -618,8 +619,8 @@ const saveComp = debounce(() => {
   tryApi("/api/settings", { app: { companion } }, "Saved");
 }, 300);
 $$("#personality input[type=checkbox]").forEach(i => i.addEventListener("change", saveComp));
-$("#focus-go").addEventListener("click", async () => { await tryApi("/api/companion/focus", { minutes: +$('[data-c="focus_minutes"]').dataset.v }, "Focus timer started"); loadPersonality(); });
-$("#focus-stop").addEventListener("click", async () => { await tryApi("/api/companion/focus", { stop: true }, "Timer stopped"); loadPersonality(); });
+$("#focus-go").addEventListener("click", async () => { await tryApi("/api/companion/focus", { minutes: +$('[data-c="focus_minutes"]').dataset.v }, "Focus timer started"); loadPersonality(); syncLive(); });
+$("#focus-stop").addEventListener("click", async () => { await tryApi("/api/companion/focus", { stop: true }, "Timer stopped"); loadPersonality(); syncLive(); });
 $$("[data-face]").forEach(b => b.addEventListener("click", () => tryApi("/api/companion/face", { icon: b.dataset.face, seconds: 3 })));
 $("#face-text").addEventListener("keydown", e => { if (e.key === "Enter" && e.target.value.trim()) { tryApi("/api/companion/face", { text: e.target.value.trim(), seconds: 5 }); e.target.value = ""; } });
 $("#brief-test").addEventListener("click", async () => {
@@ -710,6 +711,47 @@ $("#guard-on").addEventListener("change", async e => {
 $("#cube-connect").addEventListener("click", async () => { await tryApi("/api/companion/cube", { connect: true }, "Looking for the cube..."); setTimeout(loadGuard, 12000); });
 $("#cube-light").addEventListener("click", () => tryApi("/api/companion/cube", { color: "blue", seconds: 3 }));
 setInterval(() => { if (current === "guard") loadGuard(); }, 8000);
+
+/* ---------------- live state: keep the app matched to what he's doing ----------------
+   Games, timers and modes can start from the app, by voice or from the cube, so read them from him every few seconds. */
+let LIVE = {};
+async function syncLive() {
+  let h; try { h = await api("/api/companion/health"); } catch { return; }
+  if (!h) return;
+  LIVE = h;
+  const mm = s => `${Math.floor(s / 60)}:${String(Math.max(0, s % 60)).padStart(2, "0")}`;
+  // sidebar chip
+  const parts = [];
+  if (h.focus) {
+    const done = 1 - h.focus.left_s / (h.focus.total * 60);
+    parts.push(`<b>Studying</b> <span class="sub">${mm(h.focus.left_s)} left${h.focus.goal ? " · " + esc(h.focus.goal) : ""}</span><div class="bar"><i style="width:${Math.round(Math.min(1, Math.max(0, done)) * 100)}%"></i></div>`);
+  }
+  if (h.game && h.game.active) parts.push(`<b>Blackjack</b> <span class="sub">you have ${h.game.you_total}</span>`);
+  if (h.quiz_state) parts.push(`<b>Quiz</b> <span class="sub">question ${h.quiz_state.q} of ${h.quiz_state.of} · ${h.quiz_state.score} right</span>`);
+  if (h.mirror) parts.push(`<b>Camera on his face</b>`);
+  if (h.guard) parts.push(`<b>Guarding your desk</b>`);
+  if (h.speaking && !parts.length) parts.push(`<span class="sub">Speaking...</span>`);
+  const now = $("#sb-now");
+  now.hidden = !parts.length || !h.connected;
+  now.innerHTML = parts.join("<br>");
+  // blackjack panel
+  const g = h.game, bj = $("#bj");
+  bj.classList.toggle("on", !!g);
+  if (g) {
+    $("#bj-title").textContent = g.active ? "Blackjack" : `Blackjack: ${g.result}`;
+    $("#bj-hand").innerHTML = `You: <b>${g.you.map(esc).join(", ")}</b> (${g.you_total}) · Vector: <b>${g.me.map(esc).join(", ")}</b>${g.me_total != null ? ` (${g.me_total})` : ", one card hidden"}`;
+  }
+  $("#bj-hit").disabled = $("#bj-stand").disabled = !(g && g.active);
+  // focus line on the Personality page
+  const fs = $("#focus-state");
+  if (fs) fs.textContent = h.focus ? `${Math.ceil(h.focus.left_s / 60)} of ${h.focus.total} min left${h.focus.goal ? " · " + h.focus.goal : ""}` : "No timer running";
+  const mirror = $('[data-wp="mirror_mode"], #mirror');
+  if (mirror && mirror.type === "checkbox") mirror.checked = !!h.mirror;
+  const gOn = $("#guard-on");
+  if (gOn && document.activeElement !== gOn) gOn.checked = !!h.guard;
+}
+setInterval(syncLive, 2500);
+syncLive();
 
 /* ---------------- boot ---------------- */
 go("overview");

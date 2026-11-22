@@ -16,6 +16,7 @@
         <div class="rc-sub"><span class="dot" id="sb-dot"></span><span id="sb-status">Connecting...</span></div>
       </div>
     </div>
+    <div class="now" id="sb-now" hidden></div>
     <nav id="nav">
       <div class="nav-group">
         <a data-go="overview"><i class="ic" style="--c:#0a84ff">%home%</i>Overview</a>
@@ -150,7 +151,7 @@
         <div class="row"><div class="rl">Study session<small>He checks in halfway and logs your minutes</small></div><div class="rr grow"><input id="study-goal" class="field" placeholder="What are you working on?"><button class="btn primary small" id="study-go">25 min</button></div></div>
         <div class="row"><div class="rl">Studied today</div><div class="rr" id="study-today">--</div></div>
       </div>
-      <div class="group bj" id="bj"><div class="row"><div class="rl">Blackjack<small>Cards are on his face. Or say "hit" / "stand", or tap the cube once to hit, twice to stand.</small></div><div class="rr"><button class="btn primary small" id="bj-hit">Hit</button> <button class="btn small" id="bj-stand">Stand</button></div></div></div>
+      <div class="group bj" id="bj"><div class="row"><div class="rl"><span id="bj-title">Blackjack</span><small id="bj-hand">Cards are on his face. Or say "hit" / "stand", or tap the cube once to hit, twice to stand.</small></div><div class="rr"><button class="btn primary small" id="bj-hit">Hit</button> <button class="btn small" id="bj-stand">Stand</button></div></div></div>
       <div class="tiles" id="tiles"></div>
     </section>
 

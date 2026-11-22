@@ -31,6 +31,7 @@ FRAME = 1280  # 80 ms, what openWakeWord expects
 STATUS = S.DATA_DIR / "ears.json"
 WHISPER = os.environ.get("EARS_WHISPER_MODEL", "small.en")
 WAKE_WORDS = {"hey_jarvis": "Hey Jarvis", "hey_mycroft": "Hey Mycroft", "alexa": "Alexa"}
+MIC_OFF = re.compile(r"\b(stop listening|mic off|turn off (the |your )?(mic|microphone|listening)|mute (the |your )?(mic|microphone))\b", re.I)
 STOP_WORDS = re.compile(r"^(never ?mind|stop|cancel|nothing|that'?s all|thanks?,? (that'?s all|jarvis)|thank you,? jarvis)\W*$", re.I)
 
 
@@ -276,6 +277,11 @@ class Ears:
         if self.robot:
             threading.Thread(target=self._busy_watch, daemon=True).start()
         while True:  # keep going through mic unplugs, sleep/wake, etc.
+            if not self.prefs()["ears"].get("enabled", True):
+                # Mic off: the input stream is fully closed, so macOS shows no microphone indicator.
+                self.set(state="mic off", level=0.0, peak=0.0, mic_silent=False, error="")
+                time.sleep(1)
+                continue
             try:
                 with sd.InputStream(samplerate=SR, channels=1, dtype="int16", blocksize=FRAME,
                                     callback=self._callback):
@@ -313,10 +319,9 @@ class Ears:
                 self.wake = self._wake_model()
                 self.set(state=f"listening for '{WAKE_WORDS[loaded]}'")
             if not p.get("enabled", True):
-                self.set(state="off (turn on in the Vector app)")
-                time.sleep(2)
+                log("mic off")
                 self.drain()
-                continue
+                return  # run() closes the stream and waits until it's switched back on
             try:
                 f = self.frame()
             except queue.Empty:
@@ -362,6 +367,14 @@ class Ears:
                         from .voice import speak
                         speak("Sorry sir, I didn't catch that." if self.prefs()["persona"].get("style") == "jarvis"
                               else "Sorry, I didn't catch that.")
+                break
+            if MIC_OFF.search(text):
+                S.save({"ears": {"enabled": False}})
+                self._prefs = (0.0, {})
+                if self.robot:
+                    from .voice import speak
+                    speak("Microphone off. Turn me back on from the menu bar." if self.prefs()["persona"].get("style") != "jarvis"
+                          else "Microphone off, sir. Switch me back on from the menu bar when you need me.")
                 break
             if STOP_WORDS.match(text):
                 if self.robot:

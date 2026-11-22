@@ -77,36 +77,152 @@ EOF
 # It asks for the microphone (you get the "Allow" prompt), then runs the Python listener as its child,
 # which inherits the permission.
 cat > "$TMP/main.swift" <<EOF
+// Vector Ears: menu bar microphone switch + the launcher that gives the listener microphone permission.
+import AppKit
 import AVFoundation
-import Foundation
+import Carbon
 
 let root = "$ROOT"
 let py = "$PY"
+let dataDir = NSHomeDirectory() + "/.vector-companion"
+let settingsPath = dataDir + "/settings.json"
 
-let check = Process()
-check.executableURL = URL(fileURLWithPath: "/usr/bin/pgrep")
-check.arguments = ["-f", "vector_companion.ears"]
-check.standardOutput = FileHandle.nullDevice
-try? check.run(); check.waitUntilExit()
-if check.terminationStatus == 0 { exit(0) }  // already running
+func readSettings() -> [String: Any] {
+    guard let d = FileManager.default.contents(atPath: settingsPath),
+          let o = try? JSONSerialization.jsonObject(with: d) as? [String: Any] else { return [:] }
+    return o
+}
 
-let asked = DispatchSemaphore(value: 0)
-AVCaptureDevice.requestAccess(for: .audio) { _ in asked.signal() }
-asked.wait()
+func micEnabled() -> Bool {
+    let ears = readSettings()["ears"] as? [String: Any]
+    return (ears?["enabled"] as? Bool) ?? true
+}
 
-let logPath = root + "/logs/ears.out"
-if !FileManager.default.fileExists(atPath: logPath) { FileManager.default.createFile(atPath: logPath, contents: nil) }
-let log = FileHandle(forWritingAtPath: logPath)
-log?.seekToEndOfFile()
+func setMic(_ on: Bool) {
+    var s = readSettings()
+    var ears = (s["ears"] as? [String: Any]) ?? [:]
+    ears["enabled"] = on
+    s["ears"] = ears
+    try? FileManager.default.createDirectory(atPath: dataDir, withIntermediateDirectories: true)
+    if let d = try? JSONSerialization.data(withJSONObject: s, options: [.prettyPrinted]) {
+        try? d.write(to: URL(fileURLWithPath: settingsPath), options: .atomic)
+    }
+}
 
-let p = Process()
-p.executableURL = URL(fileURLWithPath: py)
-p.arguments = ["-m", "vector_companion.ears"]
-p.currentDirectoryURL = URL(fileURLWithPath: root)
-if let log = log { p.standardOutput = log; p.standardError = log }
-do { try p.run() } catch { exit(1) }
-p.waitUntilExit()
-exit(p.terminationStatus)
+func earsRunning() -> Bool {
+    let check = Process()
+    check.executableURL = URL(fileURLWithPath: "/usr/bin/pgrep")
+    check.arguments = ["-f", "vector_companion.ears"]
+    check.standardOutput = FileHandle.nullDevice
+    try? check.run(); check.waitUntilExit()
+    return check.terminationStatus == 0
+}
+
+final class AppDelegate: NSObject, NSApplicationDelegate {
+    var item: NSStatusItem!
+    var toggleItem: NSMenuItem!
+    var stateItem: NSMenuItem!
+    var quitting = false
+    var lastStart = Date.distantPast
+    var permissionAsked = false
+    var hotKey: EventHotKeyRef?
+
+    func applicationDidFinishLaunching(_ n: Notification) {
+        NSApp.setActivationPolicy(.accessory)
+        item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+        let menu = NSMenu()
+        stateItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+        stateItem.isEnabled = false
+        menu.addItem(stateItem)
+        toggleItem = NSMenuItem(title: "", action: #selector(toggle), keyEquivalent: "")
+        toggleItem.target = self
+        menu.addItem(toggleItem)
+        let hint = NSMenuItem(title: "Shortcut: Control-Option-J", action: nil, keyEquivalent: "")
+        hint.isEnabled = false
+        menu.addItem(hint)
+        menu.addItem(.separator())
+        let open = NSMenuItem(title: "Open Vector", action: #selector(openApp), keyEquivalent: "")
+        open.target = self
+        menu.addItem(open)
+        let quit = NSMenuItem(title: "Quit Vector Ears", action: #selector(quitAll), keyEquivalent: "")
+        quit.target = self
+        menu.addItem(quit)
+        item.menu = menu
+        refresh()
+        registerHotKey()
+        AVCaptureDevice.requestAccess(for: .audio) { _ in
+            DispatchQueue.main.async { self.permissionAsked = true; self.keepEarsAlive() }
+        }
+        Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { _ in
+            self.refresh()
+            self.keepEarsAlive()
+        }
+    }
+
+    func refresh() {
+        let on = micEnabled()
+        if let b = item.button {
+            b.image = NSImage(systemSymbolName: on ? "mic.fill" : "mic.slash",
+                              accessibilityDescription: on ? "Vector is listening" : "Vector's microphone is off")
+            b.image?.isTemplate = true
+            b.toolTip = on ? "Vector is listening for Hey Jarvis" : "Vector's microphone is off"
+        }
+        stateItem.title = on ? "Listening for Hey Jarvis" : "Microphone off"
+        toggleItem.title = on ? "Turn Microphone Off" : "Turn Microphone On"
+    }
+
+    @objc func toggle() {
+        let on = !micEnabled()
+        setMic(on)
+        NSSound(named: on ? "Tink" : "Pop")?.play()
+        refresh()
+    }
+
+    func keepEarsAlive() {
+        if quitting || !permissionAsked || Date().timeIntervalSince(lastStart) < 8 || earsRunning() { return }
+        lastStart = Date()
+        let logPath = root + "/logs/ears.out"
+        if !FileManager.default.fileExists(atPath: logPath) { FileManager.default.createFile(atPath: logPath, contents: nil) }
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: py)
+        p.arguments = ["-m", "vector_companion.ears"]
+        p.currentDirectoryURL = URL(fileURLWithPath: root)
+        if let log = FileHandle(forWritingAtPath: logPath) {
+            log.seekToEndOfFile()
+            p.standardOutput = log
+            p.standardError = log
+        }
+        try? p.run()
+    }
+
+    @objc func openApp() {
+        NSWorkspace.shared.open(URL(fileURLWithPath: "/Applications/Vector.app"))
+    }
+
+    @objc func quitAll() {
+        quitting = true
+        let k = Process()
+        k.executableURL = URL(fileURLWithPath: "/usr/bin/pkill")
+        k.arguments = ["-f", "vector_companion.ears"]
+        try? k.run(); k.waitUntilExit()
+        NSApp.terminate(nil)
+    }
+
+    func registerHotKey() {
+        var spec = EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
+        InstallEventHandler(GetApplicationEventTarget(), { _, _, _ in
+            DispatchQueue.main.async { (NSApp.delegate as? AppDelegate)?.toggle() }
+            return noErr
+        }, 1, &spec, nil, nil)
+        let id = EventHotKeyID(signature: OSType(0x56454152), id: 1)
+        RegisterEventHotKey(UInt32(kVK_ANSI_J), UInt32(controlKey | optionKey), id, GetApplicationEventTarget(), 0, &hotKey)
+    }
+}
+
+let app = NSApplication.shared
+let delegate = AppDelegate()
+app.delegate = delegate
+app.run()
 EOF
 if xcrun swiftc -O -o "$EARS/Contents/MacOS/VectorEars" "$TMP/main.swift" >/dev/null 2>"$TMP/swift.err"; then
   echo "   built the native microphone launcher"

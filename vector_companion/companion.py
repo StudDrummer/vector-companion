@@ -582,15 +582,19 @@ class Companion:
             secs = len(audio) / float(sr)
             self.speaking_until = time.time() + secs + 1
             player = None
+            mac_done = False
             if out in ("mac", "both"):
-                hi = os.path.join(tempfile.gettempdir(), f"jarvis-{threading.get_ident()}.wav")
-                tts.write_wav(hi, audio, sr)
                 vol = max(0.0, min(2.0, float(S.load()["voice"].get("mac_volume") or 1.0)))
-                player = subprocess.Popen(["afplay", "-v", f"{vol:.2f}", hi],
-                                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 if out == "mac" and self.connected and not self._face_busy():
                     threading.Thread(target=lambda: _safe(self.face, "talking", "", secs + 0.3), daemon=True).start()
-            if out in ("vector", "both") and (r is not None or self.connected):
+                if out == "mac" and tts.play_on_mac(audio, sr, vol):
+                    mac_done = True  # played in-process, device kept warm between sentences
+                else:
+                    hi = os.path.join(tempfile.gettempdir(), f"jarvis-{threading.get_ident()}.wav")
+                    tts.write_wav(hi, audio, sr)
+                    player = subprocess.Popen(["afplay", "-v", f"{vol:.2f}", hi],
+                                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            if not mac_done and out in ("vector", "both") and (r is not None or self.connected):
                 try:
                     lo = os.path.join(tempfile.gettempdir(), f"vector-say16-{threading.get_ident()}.wav")
                     tts.write_wav(lo, tts.resample(audio, sr, 16000), 16000)

@@ -197,6 +197,70 @@ def polish(audio, sr: int):
     return (out * 32767).astype(np.int16)
 
 
+class _Player:
+    """Plays through the Mac's speakers from inside this process, keeping the audio device open between
+    sentences (starting afplay each time added ~1 s while the speakers woke up). Closes after a quiet minute."""
+    IDLE_CLOSE = 60.0
+
+    def __init__(self):
+        self.stream = None
+        self.sr = 0
+        self.last = 0.0
+        self.lock = threading.Lock()
+        threading.Thread(target=self._idle, daemon=True).start()
+
+    def play(self, audio, sr: int, volume: float = 1.0) -> bool:
+        import numpy as np
+        try:
+            import sounddevice as sd
+        except Exception:  # noqa: BLE001
+            return False
+        with self.lock:
+            try:
+                if self.stream is None or self.sr != sr:
+                    self._close()
+                    self.stream = sd.OutputStream(samplerate=sr, channels=1, dtype="int16", latency="low")
+                    self.stream.start()
+                    self.sr = sr
+                a = audio if volume == 1.0 else np.clip(audio.astype(np.float32) * volume, -32768, 32767).astype(np.int16)
+                tail = np.zeros(int(sr * 0.12), dtype=np.int16)  # let the last syllable leave the buffer
+                self.stream.write(np.concatenate([a, tail]).reshape(-1, 1))
+                self.last = time.time()
+                return True
+            except Exception as e:  # noqa: BLE001
+                log(f"speaker stream failed ({e}); using afplay")
+                self._close()
+                return False
+
+    def _close(self):
+        if self.stream is not None:
+            try:
+                self.stream.stop()
+                self.stream.close()
+            except Exception:  # noqa: BLE001
+                pass
+        self.stream = None
+
+    def _idle(self):
+        while True:
+            time.sleep(5)
+            if self.stream is not None and time.time() - self.last > self.IDLE_CLOSE and self.lock.acquire(blocking=False):
+                try:
+                    self._close()
+                finally:
+                    self.lock.release()
+
+
+PLAYER = None
+
+
+def play_on_mac(audio, sr: int, volume: float = 1.0) -> bool:
+    global PLAYER
+    if PLAYER is None:
+        PLAYER = _Player()
+    return PLAYER.play(audio, sr, volume)
+
+
 def resample(audio, sr: int, to: int = 16000):
     import numpy as np
     if sr == to:

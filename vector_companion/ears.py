@@ -120,17 +120,32 @@ class Ears:
         import numpy as np
         self._stt().transcribe(np.zeros(SR, dtype=np.float32), language="en", beam_size=1)  # warm up
 
+    @staticmethod
+    def _whisper(name: str, threads: int):
+        """Apple GPU (Metal) when this ctranslate2 supports it (about 2x faster), else the CPU."""
+        import numpy as np
+        from faster_whisper import WhisperModel
+        tries = [("mps", "float16"), ("mps", "int8_float16")] if sys.platform == "darwin" and \
+            S.load()["ears"].get("gpu", True) else []
+        for dev, ct in tries:
+            try:
+                m = WhisperModel(name, device=dev, compute_type=ct)
+                list(m.transcribe(np.zeros(SR // 2, dtype=np.float32), language="en", beam_size=1)[0])
+                log(f"{name}: running on the Apple GPU ({ct})")
+                return m
+            except Exception as e:  # noqa: BLE001
+                log(f"{name}: GPU {ct} not available ({str(e)[:80]})")
+        return WhisperModel(name, device="cpu", compute_type="int8", cpu_threads=threads)
+
     def _stt(self):
         if self.stt is None:
-            from faster_whisper import WhisperModel
-            self.stt = WhisperModel(WHISPER, device="cpu", compute_type="int8", cpu_threads=4)
+            self.stt = self._whisper(WHISPER, 4)
         return self.stt
 
     def _quick(self):
         if self.quick is None:
             try:
-                from faster_whisper import WhisperModel
-                self.quick = WhisperModel(QUICK, device="cpu", compute_type="int8", cpu_threads=2)
+                self.quick = self._whisper(QUICK, 2)
             except Exception as e:  # noqa: BLE001
                 log(f"quick model unavailable ({e}); using the main one")
                 self.quick = self._stt()

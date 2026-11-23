@@ -143,6 +143,17 @@ def _ping(url: str) -> bool:
         return False
 
 
+def _relaunch():
+    """Quit and reopen the app with the latest code. (exec'ing in place from a background thread can take
+    the window down with it, so ask macOS to start a fresh copy a moment after this one exits.)"""
+    app = "/Applications/Vector.app"
+    if sys.platform == "darwin" and os.path.exists(app):
+        subprocess.Popen(["/bin/sh", "-c", f'sleep 1.5; open "{app}"'], start_new_session=True,
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        os._exit(0)
+    os.execv(sys.executable, [sys.executable, "-m", "vector_companion.app"])
+
+
 def status() -> dict:
     try:
         comp = cc.call("/health", timeout=1.5)
@@ -594,7 +605,7 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/do":
                 return self._json(cc.call("/do", {"action": str(b.get("action", ""))}, timeout=90))
             if path == "/api/app_restart":  # reload this app with the latest code
-                threading.Timer(0.5, lambda: os.execv(sys.executable, [sys.executable, "-m", "vector_companion.app"])).start()
+                threading.Timer(0.5, _relaunch).start()
                 return self._json({"ok": True})
             if path == "/api/companion_restart":
                 return self._json({"ok": restart_brain("companion")})

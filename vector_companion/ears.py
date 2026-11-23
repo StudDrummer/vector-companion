@@ -367,7 +367,7 @@ class Ears:
         peak_score, peak_level, last_report, silent_since = 0.0, 0.0, time.time(), time.time()
         lead: deque = deque(maxlen=5)  # 0.4 s before you start, so the first syllable isn't clipped
         seg: list = []
-        quiet, oww_hit, cued = 0, False, False
+        quiet, oww_hit, cued, seg_score = 0, False, False, 0.0
         prev, prev_end = [], 0.0  # the sentence before, in case you put the name at the end after a pause
         while True:
             if time.time() - last_report > 1.0:  # live meter for the app + silent-mic detection
@@ -421,7 +421,9 @@ class Ears:
 
             # ---- name mode: cut the audio into sentences, check each one for "Jarvis"
             loud = r > max(self.noise * 2.2, 20.0)
-            if fired and not oww_hit:
+            if seg or loud:
+                seg_score = max(seg_score, score)
+            if fired and score >= 0.6 and not oww_hit:  # stricter here: a chime should mean he really heard it
                 oww_hit = True
                 if not cued:  # "Hey Jarvis" recognised mid-sentence: let you know straight away
                     cued = True
@@ -436,8 +438,8 @@ class Ears:
             dur = len(seg) * FRAME / SR
             if quiet < END_QUIET and dur < 15:
                 continue
-            frames, hit, was_cued = seg, oww_hit, cued
-            seg, quiet, oww_hit, cued = [], 0, False, False
+            frames, hit, was_cued, best = seg, oww_hit, cued, seg_score
+            seg, quiet, oww_hit, cued, seg_score = [], 0, False, False, 0.0
             lead.clear()
             if dur - END_QUIET * FRAME / SR < 0.3:
                 continue  # a click or a cough
@@ -451,7 +453,7 @@ class Ears:
                 self.cue()
             check = time.time() - t0
             text = self.transcribe(frames, raw=True)
-            if not hit and not NAME.search(text):
+            if not NAME.search(text) and not (hit and best >= 0.8):
                 log(f"false alarm (quick check heard the name, full pass heard {text[:60]!r})")
                 continue
             if recent and not re.match(r"^\W*((hey|ok|okay|hi|yo)\W+)?" + NAME.pattern, text, re.I) \

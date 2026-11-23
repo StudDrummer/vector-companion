@@ -497,19 +497,36 @@ class Companion:
         self.ctl_last = time.time() + seconds  # keep control while it's showing
 
     def say(self, text: str):
+        if self.voice_output() == "mac" and self.voice_engine() != "robot":
+            self.speak(None, text)  # the Mac speaks: no need to wait for (or even reach) the robot
+            return
         with self.control() as r:
             self.speak(r, text)
 
     # ------------------------------------------------------------ voice
     def voice_engine(self) -> str:
-        """'mac' (a Mac voice through his speaker, e.g. British JARVIS) or 'robot' (his own voice)."""
+        """'piper' (neural Jarvis voice), 'mac' (a built-in Mac voice) or 'robot' (his own voice)."""
+        from . import tts
         v = S.load()["voice"]
         eng = v.get("engine", "auto")
         if eng == "auto":
-            eng = "mac" if S.load().get("persona", {}).get("style") == "jarvis" else "robot"
-        if eng == "mac" and (not shutil.which("say") or time.time() < self.audio_broken_until):
+            jarvis = S.load().get("persona", {}).get("style") == "jarvis"
+            eng = ("piper" if tts.ready() else "mac") if jarvis else "robot"
+        if eng == "piper" and not tts.ready():
+            eng = "mac"
+        if eng == "mac" and not shutil.which("say"):
+            eng = "robot"
+        if eng != "robot" and self.voice_output() != "mac" and time.time() < self.audio_broken_until:
             eng = "robot"
         return eng
+
+    def voice_output(self) -> str:
+        """Where the voice comes out: 'mac' (Mac speakers, best sound), 'vector' (his speaker) or 'both'."""
+        out = str(S.load()["voice"].get("output") or "mac")
+        out = out if out in ("mac", "vector", "both") else "mac"
+        if out != "vector" and not shutil.which("afplay"):
+            out = "vector"  # no Mac audio player here
+        return out
 
     def play_wav(self, path: str):
         """Play a sound file through his speaker (16 kHz mono WAV)."""
@@ -521,41 +538,86 @@ class Companion:
             self.speaking_until = time.time() + secs + 1
             self.call(lambda: raw.audio.stream_wav_file(path, vol), secs + 15, "play_sound")
 
-    def _mac_wav(self, text: str) -> tuple[str, float]:
+    def _render(self, text: str, engine: str):
+        """Text -> (int16 audio, sample rate) in the chosen voice."""
+        import numpy as np
+        if engine == "piper":
+            from . import tts
+            return tts.synth(text)
         v = S.load()["voice"]
         path = os.path.join(tempfile.gettempdir(), f"vector-say-{threading.get_ident()}.wav")
         subprocess.run(["say", "-v", str(v.get("mac_voice") or "Daniel"), "-r", str(int(v.get("rate") or 190)),
-                        "-o", path, "--file-format=WAVE", "--data-format=LEI16@16000", text],
+                        "-o", path, "--file-format=WAVE", "--data-format=LEI16@22050", text],
                        capture_output=True, timeout=30, check=True)
         with wave.open(path, "rb") as w:
-            return path, w.getnframes() / float(w.getframerate())
+            return np.frombuffer(w.readframes(w.getnframes()), dtype=np.int16), w.getframerate()
+
+    def _mac_wav(self, text: str) -> tuple[str, float]:
+        """16 kHz WAV for his speaker (kept for callers that stream a file themselves)."""
+        from . import tts
+        audio, sr = self._render(text, "piper" if self.voice_engine() == "piper" else "mac")
+        path = os.path.join(tempfile.gettempdir(), f"vector-say16-{threading.get_ident()}.wav")
+        return path, tts.write_wav(path, tts.resample(audio, sr, 16000), 16000)
 
     def speak(self, r, text: str):
-        """Say something in the chosen voice. Needs behavior control (pass the robot from `with control()`)."""
+        """Say something in the chosen voice and place. Pass the robot from `with control()` when he should
+        speak through his own speaker; with Mac output r may be None."""
+        from . import tts
         text = (text or "").strip()
         if not text:
             return
         self.speaking_until = time.time() + 2 + len(text) / 12
         try:
-            if self.voice_engine() == "mac":
+            eng, out = self.voice_engine(), self.voice_output()
+            if eng == "robot":
+                if r is None:
+                    with self.control() as r2:
+                        r2.behavior.say_text(text)
+                else:
+                    r.behavior.say_text(text)
+                return
+            t0 = time.time()
+            audio, sr = self._render(text, eng)
+            t_synth = time.time() - t0
+            secs = len(audio) / float(sr)
+            self.speaking_until = time.time() + secs + 1
+            player = None
+            if out in ("mac", "both"):
+                hi = os.path.join(tempfile.gettempdir(), f"jarvis-{threading.get_ident()}.wav")
+                tts.write_wav(hi, audio, sr)
+                vol = max(0.0, min(2.0, float(S.load()["voice"].get("mac_volume") or 1.0)))
+                player = subprocess.Popen(["afplay", "-v", f"{vol:.2f}", hi],
+                                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                if out == "mac" and self.connected and not self._face_busy():
+                    threading.Thread(target=lambda: _safe(self.face, "talking", "", secs + 0.3), daemon=True).start()
+            if out in ("vector", "both") and (r is not None or self.connected):
                 try:
-                    t0 = time.time()
-                    path, secs = self._mac_wav(text)
-                    t_synth = time.time() - t0
-                    self.speaking_until = time.time() + secs + 1
+                    lo = os.path.join(tempfile.gettempdir(), f"vector-say16-{threading.get_ident()}.wav")
+                    tts.write_wav(lo, tts.resample(audio, sr, 16000), 16000)
                     vol = max(0, min(100, int(S.load()["voice"].get("volume") or 80)))
                     raw = self.raw
-                    self.call(lambda: raw.audio.stream_wav_file(path, vol), secs + 15, "stream_wav_file")
-                    log(f"speech timing: voice {t_synth:.1f}s, playback {time.time() - t0 - t_synth:.1f}s for {secs:.1f}s of audio")
-                    return
+                    self.call(lambda: raw.audio.stream_wav_file(lo, vol), secs + 15, "stream_wav_file")
                 except VectorOffline:
-                    raise
+                    if player is None:
+                        raise
                 except Exception as e:  # noqa: BLE001
-                    self.audio_broken_until = time.time() + 600
-                    log(f"Mac voice playback failed, using his own voice for 10 min: {e!r}"[:300])
-            r.behavior.say_text(text)
+                    if player is None:
+                        self.audio_broken_until = time.time() + 600
+                        log(f"voice through his speaker failed, using his own voice for 10 min: {e!r}"[:300])
+                        (r or self.robot).behavior.say_text(text)
+            if player is not None:
+                try:
+                    player.wait(timeout=secs + 10)
+                except subprocess.TimeoutExpired:
+                    player.kill()
+            log(f"speech timing: voice {t_synth:.2f}s, total {time.time() - t0:.1f}s for {secs:.1f}s of audio ({eng} -> {out})")
         finally:
             self.speaking_until = time.time() + 0.6
+
+    def _face_busy(self) -> bool:
+        """Don't cover the cards, the camera view or a quiz with the talking face."""
+        bj = self.actions.bj if getattr(self, "actions", None) else None
+        return bool(self.mirror_on or (bj and bj.active) or (self.quiz and self.quiz.active))
 
     def announce(self, text: str, icon: str = "check"):
         img = face_art.ICONS.get(icon, face_art.check)()
@@ -1524,6 +1586,8 @@ def main():
     log("companion starting")
     COMP = Companion()
     COMP.resume_focus()
+    from . import tts
+    threading.Thread(target=tts.warm, daemon=True).start()  # first sentence shouldn't wait for the voice to load
     srv = ThreadingHTTPServer(("127.0.0.1", PORT), Handler)
     print(f"[companion] http://127.0.0.1:{PORT}")
     srv.serve_forever()

@@ -98,6 +98,8 @@ NO_OPEN=1 bash "$ROOT/install_app.sh" >/dev/null && echo "   /Applications/Vecto
 step "Hey Jarvis (your Mac's microphone)"
 if "$ROOT/.venv/bin/pip" install -q "openwakeword>=0.6" sounddevice faster-whisper onnxruntime scipy; then
   "$PY" -m vector_companion.ears --setup || echo "   model download failed; it will retry the first time Ears starts"
+  echo "   Jarvis voice (Piper, offline neural voice)..."
+  "$PY" -m vector_companion.tts --install || echo "   voice download failed; pick a voice on the Jarvis page to retry"
   EPLIST="$HOME/Library/LaunchAgents/com.rushil.vector-ears.plist"
   cat > "$EPLIST" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>

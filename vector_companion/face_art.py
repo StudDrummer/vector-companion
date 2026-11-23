@@ -339,4 +339,21 @@ def card_hud(title: str, lines: list[tuple[str, tuple]], accent=CYAN) -> Image.I
     return _done(im)
 
 
-ICONS.update({"listening": listening, "thinking": thinking_dots})
+def talking() -> Image.Image:
+    """While Jarvis speaks through the Mac: a glowing ring with a voice line across it."""
+    import math
+    im, d = _hi()
+    cx, cy = W * S3 / 2, H * S3 / 2
+    for r, col, w in ((118, (20, 60, 90), 6), (100, (40, 140, 200), 5), (80, CYAN, 4)):
+        d.ellipse([cx - r, cy - r, cx + r, cy + r], outline=col, width=w)
+    d.ellipse([cx - 26, cy - 26, cx + 26, cy + 26], fill=(150, 225, 255))
+    pts = []
+    for i in range(0, 261, 4):
+        x = cx - 130 + i
+        env = math.sin(math.pi * i / 260)
+        pts.append((x, cy + env * 34 * math.sin(i / 9.0) * (0.6 + 0.4 * math.sin(i / 23.0))))
+    d.line(pts, fill=(235, 250, 255), width=5, joint="curve")
+    return _done(im)
+
+
+ICONS.update({"listening": listening, "thinking": thinking_dots, "talking": talking})

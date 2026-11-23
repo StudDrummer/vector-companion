@@ -40,9 +40,10 @@ DEFAULTS: dict = {
                   "cube_button": True, "stretch_reminders": True, "stretch_minutes": 50,
                   "bedtime_nudge": True, "dock_head_angle": 25},
     # how he sounds: his own robot voice, or a Mac voice played through his speaker
-    "voice": {"engine": "auto", "mac_voice": "Daniel", "rate": 190, "volume": 80},
+    "voice": {"engine": "auto", "mac_voice": "Daniel", "rate": 190, "volume": 80, "piper_voice": "en_GB-alan-medium",
+              "speed": 1.0, "fx": True, "output": "mac", "mac_volume": 1.0},
     # "Hey Jarvis" through the Mac's microphone (Vector Ears)
-    "ears": {"enabled": True, "mode": "vector", "wake_word": "hey_jarvis", "sensitivity": 0.5, "follow_up": True, "chime": True},
+    "ears": {"enabled": True, "mode": "vector", "wake_word": "jarvis", "sensitivity": 0.5, "follow_up": True, "chime": True},
     "guard": {"notify": True, "save_photos": True},
     "weather": {"enabled": True, "place": "Bellevue, WA", "units": "fahrenheit"},
 }

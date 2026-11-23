@@ -25,7 +25,7 @@
         <a data-go="actions"><i class="ic" style="--c:#ff9f0a">%spark%</i>Actions</a>
       </div>
       <div class="nav-group">
-        <a data-go="jarvis"><i class="ic" style="--c:#0a84ff">%mic%</i>Hey Jarvis</a>
+        <a data-go="jarvis"><i class="ic" style="--c:#0a84ff">%mic%</i>Jarvis</a>
         <a data-go="guard"><i class="ic" style="--c:#30d158">%shield%</i>Desk Guard &amp; Cube</a>
       </div>
       <div class="nav-group">
@@ -219,16 +219,16 @@
 
     <!-- HEY JARVIS -->
     <section id="jarvis" class="page">
-      <h2 class="ptitle">Hey Jarvis</h2>
-      <p class="lead">Say <b>"Hey Jarvis"</b> and what you want in one go. It works like "Hey Vector": <b>"Hey Jarvis, play blackjack"</b>, <b>"give me a fist bump"</b>, <b>"go to sleep"</b> make him do it himself; anything else, like <b>"what's the weather?"</b> or <b>"explain mitosis"</b>, he answers. Keep talking for follow-ups (say "hit" or "stand" in blackjack). "That's all" ends it.</p>
+      <h2 class="ptitle">Jarvis</h2>
+      <p class="lead">Just talk to him by name, in one breath: <b>"Jarvis, what's the weather tomorrow?"</b>, <b>"Jarvis, play blackjack"</b>, <b>"What time is it, Jarvis?"</b>. Say only <b>"Jarvis"</b> and he answers "Sir?" and waits. Keep talking for follow-ups; "that's all" ends it, "stop listening" turns the mic off. Everything he hears is processed on this Mac and only acted on when you say his name.</p>
       <div class="group">
         <div class="row"><div class="rl">Status<small id="ears-sub"></small></div><div class="rr" id="ears-state">--</div></div>
         <div class="row"><div class="rl">Last heard<small id="ears-reply"></small></div><div class="rr mute" id="ears-text">--</div></div>
       </div>
       <div class="group-title">Listening</div>
       <div class="group">
-        <div class="row"><div class="rl">Listen for the wake word</div><div class="rr"><label class="sw"><input type="checkbox" data-k="ears.enabled"><span></span></label></div></div>
-        <div class="row"><div class="rl">Wake word</div><div class="rr"><div class="seg" data-k="ears.wake_word"><button data-v="hey_jarvis">Hey Jarvis</button><button data-v="hey_mycroft">Hey Mycroft</button><button data-v="alexa">Alexa</button></div></div></div>
+        <div class="row"><div class="rl">Microphone on<small>Menu bar mic icon or Control-Option-J also switch it</small></div><div class="rr"><label class="sw"><input type="checkbox" data-k="ears.enabled"><span></span></label></div></div>
+        <div class="row"><div class="rl">Wake word</div><div class="rr"><div class="seg" data-k="ears.wake_word"><button data-v="jarvis">Jarvis</button><button data-v="hey_jarvis">Hey Jarvis</button><button data-v="hey_mycroft">Hey Mycroft</button><button data-v="alexa">Alexa</button></div></div></div>
         <div class="row"><div class="rl">Sensitivity<small>Higher hears you from farther away but may wake by accident</small></div><div class="rr grow"><input type="range" class="slider" min="0.1" max="0.9" step="0.1" data-k="ears.sensitivity"></div></div>
         <div class="row"><div class="rl">Follow-up questions without the wake word</div><div class="rr"><label class="sw"><input type="checkbox" data-k="ears.follow_up"><span></span></label></div></div>
         <div class="row"><div class="rl">Chime when he hears you</div><div class="rr"><label class="sw"><input type="checkbox" data-k="ears.chime"><span></span></label></div></div>
@@ -236,10 +236,13 @@
       </div>
       <div class="group-title">His voice</div>
       <div class="group">
-        <div class="row"><div class="rl">Voice<small>Auto: a British JARVIS voice when the JARVIS personality is on, his own robot voice otherwise</small></div><div class="rr"><div class="seg" data-k="voice.engine"><button data-v="auto">Auto</button><button data-v="robot">Robot</button><button data-v="mac">JARVIS</button></div></div></div>
-        <div class="row"><div class="rl">JARVIS voice</div><div class="rr"><select class="field sel" id="voices" data-k="voice.mac_voice"></select></div></div>
-        <div class="row"><div class="rl">Speed</div><div class="rr grow"><input type="range" class="slider" min="140" max="240" step="10" data-k="voice.rate"></div></div>
-        <div class="row"><div class="rl">Loudness</div><div class="rr grow"><input type="range" class="slider" min="30" max="100" step="5" data-k="voice.volume"></div></div>
+        <div class="row"><div class="rl">Voice<small>Jarvis: natural neural voice, made on this Mac. Mac: built-in voice. Robot: Vector's own.</small></div><div class="rr"><div class="seg" data-k="voice.engine"><button data-v="auto">Auto</button><button data-v="piper">Jarvis</button><button data-v="mac">Mac</button><button data-v="robot">Robot</button></div></div></div>
+        <div class="row"><div class="rl">Jarvis voice<small id="tts-sub"></small></div><div class="rr"><select class="field sel" id="piper-voices"></select> <button class="btn small" id="tts-get" hidden>Download</button></div></div>
+        <div class="row"><div class="rl">Speak through<small>Mac speakers sound far better and are faster; his face shows when he's talking</small></div><div class="rr"><div class="seg" data-k="voice.output"><button data-v="mac">Mac</button><button data-v="vector">Vector</button><button data-v="both">Both</button></div></div></div>
+        <div class="row"><div class="rl">Speed</div><div class="rr grow"><input type="range" class="slider" min="0.8" max="1.3" step="0.05" data-k="voice.speed"></div></div>
+        <div class="row"><div class="rl">Room polish<small>A touch of presence and space, like a voice in the room</small></div><div class="rr"><label class="sw"><input type="checkbox" data-k="voice.fx"><span></span></label></div></div>
+        <div class="row"><div class="rl">Mac voice (if not using Jarvis)</div><div class="rr"><select class="field sel" id="voices" data-k="voice.mac_voice"></select></div></div>
+        <div class="row"><div class="rl">Loudness on Vector</div><div class="rr grow"><input type="range" class="slider" min="30" max="100" step="5" data-k="voice.volume"></div></div>
         <div class="row"><div class="rl">Try it</div><div class="rr grow"><input id="voice-try" class="field" value="Good evening, sir. All systems are online." ><button class="btn primary small" id="voice-try-btn">Speak</button></div></div>
       </div>
       <div class="group-title">Things to say</div>

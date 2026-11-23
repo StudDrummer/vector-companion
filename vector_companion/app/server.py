@@ -499,6 +499,9 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json({"today": study_today()})
             if path == "/api/ears":
                 return self._json(ears_status())
+            if path == "/api/tts":
+                from .. import tts
+                return self._json(tts.status())
             if path == "/api/voices":
                 return self._json(mac_voices())
             if path == "/api/sensors":
@@ -580,6 +583,10 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/settings":
                 return self._json({"app": S.save(b.get("app", {})),
                                    "brain": save_brain(b["brain"]) if "brain" in b else brain_settings()})
+            if path == "/api/tts/install":
+                from .. import tts
+                tts.install_async(str(b.get("voice", "")) or None)
+                return self._json({"ok": True})
             if path == "/api/ears/restart":
                 return self._json({"ok": restart_ears()})
             if path == "/api/quiz":

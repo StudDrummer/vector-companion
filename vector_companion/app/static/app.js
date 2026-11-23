@@ -674,6 +674,7 @@ async function loadJarvis() {
     if (!v.includes(cur)) v.unshift(cur);
     $("#voices").innerHTML = v.map(n => `<option${n === cur ? " selected" : ""}>${esc(n)}</option>`).join("");
   }
+  loadTts();
   refreshEars(); clearInterval(earsT); earsT = setInterval(() => current === "jarvis" ? refreshEars() : clearInterval(earsT), 1500);
 }
 async function refreshEars() {
@@ -681,15 +682,31 @@ async function refreshEars() {
   const age = e.at ? (Date.now() / 1000 - e.at) : 1e9;
   const running = e.running;
   const st = !running ? '<span class="bad">Not running</span>' : e.state === "error" ? `<span class="bad">Microphone problem</span>`
-    : /listening for '/.test(e.state || "") ? `<span class="ok">${esc(e.state.replace("listening for", "Listening for"))}</span>` : esc(e.state || "--");
+    : /listening for '/.test(e.state || "") ? `<span class="ok">${esc(e.state.replace("listening for", "Listening for"))}</span>` : e.state === "mic off" ? '<span class="mute">Mic off</span>'  : esc(e.state || "--");
   $("#ears-state").innerHTML = st;
   const meter = e.peak !== undefined ? ` · mic ${e.mic_silent ? "SILENT" : Math.round(e.peak)} · best match ${Math.round((e.best_score || 0) * 100)}%` : "";
-  $("#ears-sub").textContent = e.error ? e.error : running ? `Heard the wake word ${e.heard || 0} time${e.heard === 1 ? "" : "s"}${meter}` : "Click Restart Ears, then allow the microphone";
+  $("#ears-sub").textContent = e.error ? e.error : running ? `Heard his name ${e.heard || 0} time${e.heard === 1 ? "" : "s"}${meter}` : "Click Restart Ears, then allow the microphone";
   if (e.mic_silent && running) $("#ears-state").innerHTML = '<span class="bad">Microphone blocked</span>';
   $("#ears-text").textContent = e.last_text ? `"${e.last_text}"` : "--";
   $("#ears-reply").textContent = e.last_reply ? "Reply: " + e.last_reply.slice(0, 140) : "";
 }
 $("#ears-restart").addEventListener("click", async () => { await tryApi("/api/ears/restart", {}, "Restarting Ears"); setTimeout(refreshEars, 2500); });
+let ttsT;
+async function loadTts() {
+  let t = {}; try { t = await api("/api/tts"); } catch { return; }
+  const sel = $("#piper-voices");
+  sel.innerHTML = Object.entries(t.voices || {}).map(([k, v]) => `<option value="${k}"${k === t.chosen ? " selected" : ""}>${esc(v.label)}${v.installed ? "" : " (download)"}</option>`).join("");
+  const cur = (t.voices || {})[sel.value] || {};
+  const busy = t.state && /installing|downloading/.test(t.state) && Date.now() / 1000 - (t.at || 0) < 900;
+  $("#tts-get").hidden = !!cur.installed || busy;
+  $("#tts-sub").textContent = busy ? t.state + "..." : t.state === "error" ? "Download failed: " + (t.error || "") : !t.piper ? "Not installed yet" : cur.installed ? "Ready" : "Not downloaded";
+  clearTimeout(ttsT); if (busy && current === "jarvis") ttsT = setTimeout(loadTts, 2000);
+}
+$("#piper-voices").addEventListener("change", async e => {
+  await tryApi("/api/settings", { app: { voice: { piper_voice: e.target.value } } }, "Voice chosen");
+  loadTts();
+});
+$("#tts-get").addEventListener("click", async () => { await tryApi("/api/tts/install", { voice: $("#piper-voices").value }, "Downloading voice"); setTimeout(loadTts, 800); });
 $("#voice-try-btn").addEventListener("click", () => tryApi("/api/companion/say", { text: $("#voice-try").value }, "Speaking"));
 
 /* ---------------- desk guard + cube ---------------- */

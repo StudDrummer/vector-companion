@@ -508,8 +508,8 @@ def skill(text: str) -> str | None:
                 if re.search(r"\bgrades?\b|\bscores?\b", t, re.I):
                     return canvas.grades_sentence()
                 low = t.lower()
-                days = 1 if "today" in low else 2 if "tomorrow" in low else 7
-                return canvas.due_sentence(days)
+                only = "today" if "today" in low or "tonight" in low else "tomorrow" if "tomorrow" in low else ""
+                return canvas.due_sentence(7, only)
             if kind == "close":
                 if re.search(r"\b(the )?(game|blackjack|timer|session)\b", g, re.I):
                     return None
@@ -535,8 +535,9 @@ def skill(text: str) -> str | None:
                 return calendar_sentence(t)
             if kind == "due":
                 from . import canvas
-                days = 1 if "today" in t.lower() else 2 if "tomorrow" in t.lower() else 7
-                return canvas.due_sentence(days)
+                low = t.lower()
+                only = "today" if "today" in low or "tonight" in low else "tomorrow" if "tomorrow" in low else ""
+                return canvas.due_sentence(7, only)
             if kind == "grades":
                 if not re.search(r"\bgrades?\b", t, re.I):
                     continue

@@ -1435,12 +1435,12 @@ class Reminders:
         from . import canvas
         if not canvas.connected():
             return
-        tomorrow = now.date() + timedelta(days=1)
+        tomorrow = canvas.now().date() + timedelta(days=1)
         items = [i for i in canvas.upcoming(2) if not i["done"] and i["due"].date() == tomorrow]
         if not items:
             return
         jarvis = S.load().get("persona", {}).get("style") == "jarvis"
-        names = "; ".join(i["title"] for i in items[:3])
+        names = "; ".join(canvas._clean_title(i["title"]) for i in items[:3])
         msg = (f"A heads-up{', sir' if jarvis else ''}: due tomorrow on Canvas, {names}."
                + (f" Plus {len(items) - 3} more." if len(items) > 3 else ""))
         log("evening Canvas heads-up")

@@ -391,9 +391,8 @@ def briefing() -> str:
     try:
         from . import canvas
         if canvas.connected():
-            due = [i for i in canvas.upcoming(1) if not i["done"]]
-            if due:
-                out.append(f"Due today or tomorrow on Canvas: " + "; ".join(i["title"] for i in due[:3]) + ".")
+            out.append(canvas.due_sentence(7, "today").replace("Due today:", "Due today on Canvas:")
+                       .replace("Nothing due on Canvas today.", "Nothing due on Canvas today."))
     except Exception as e:  # noqa: BLE001
         print(f"[brain] canvas skipped: {e}")
     soon = _reminders(3)

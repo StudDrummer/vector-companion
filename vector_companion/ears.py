@@ -534,11 +534,9 @@ class Ears:
             log(f"name check {check:.2f}s, full text {time.time() - t0 - check:.2f}s: {text!r}")
             if command:
                 self.conversation(None, first=True, text=command)
-            else:  # just "Jarvis": answer like he's paying attention, then take the request
-                from .voice import speak
-                if self.robot:
-                    speak("Sir?" if self.prefs()["persona"].get("style") == "jarvis" else "Yes?")
-                self.conversation(self.record(wait_for_speech=5.0), first=True)
+            else:  # just "Jarvis": the chime and his listening face say he's ready; you go straight on
+                # (no spoken "Sir?": you'd start talking over it and lose the first words)
+                self.conversation(self.record(wait_for_speech=5.0), first=True, quiet_fail=True)
             self.after_conversation(lead)
 
     def idle_state(self) -> str:
@@ -549,7 +547,7 @@ class Ears:
         lead.clear()
         self.set(state=self.idle_state())
 
-    def conversation(self, frames, first: bool = False, text: str | None = None):
+    def conversation(self, frames, first: bool = False, text: str | None = None, quiet_fail: bool = False):
         turns = 0
         while (frames is not None or text) and turns < 12:
             t0 = time.time()
@@ -565,7 +563,7 @@ class Ears:
                 if first and turns == 0:
                     log("woke up but didn't catch any words")
                     self.set(last_text="(didn't catch that)")
-                    if self.robot:
+                    if self.robot and not quiet_fail:
                         from .voice import speak
                         speak("Sorry sir, I didn't catch that." if self.prefs()["persona"].get("style") == "jarvis"
                               else "Sorry, I didn't catch that.")

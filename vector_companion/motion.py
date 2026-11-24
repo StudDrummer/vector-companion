@@ -68,6 +68,7 @@ class Motion:
             log(f"motion: {action} failed: {msg}")
             self._say(self._friendly(action, msg))
         finally:
+            self.c.cube_handled_until = time.time() + 5  # the cube settling after he lets go isn't a tap
             self.busy = None
             self.lock.release()
 

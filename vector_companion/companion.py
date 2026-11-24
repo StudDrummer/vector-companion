@@ -1145,6 +1145,9 @@ class Companion:
 
     def _on_cube_tap(self, robot, event_type, event, *a):
         now = time.time()
+        m = getattr(self.actions, "motion", None)
+        if (m and m.busy) or now < getattr(self, "cube_handled_until", 0):
+            return  # he's carrying or rolling the cube himself: those bumps aren't you tapping it
         if self._taps and now - self._taps[-1] < 0.25:
             return  # one physical tap often reports twice
         self._taps.append(now)

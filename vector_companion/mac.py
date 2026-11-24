@@ -448,6 +448,7 @@ PATTERNS = [
     (r"\bremind me\b|\bset (?:a |an )?(?:timer|alarm|reminder)\b|\btimer for\b", "remind"),
     (r"\b(what are )?my reminders\b|\bwhat reminders\b", "list_reminders"),
     (r"^(?:can you |please )?(?:close|quit|exit|shut) (?:down )?(.+)$", "close"),
+    (r"\bcanvas\b(?!.*\b(open|close)\b)|\bwhat (homework|assignments?) do i have\b|\bwhat do i have due\b|\bany (homework|assignments)\b", "canvas_any"),
     (r"^(?:play|resume|start|put on)(?: some| my)? (?:music|songs?|spotify|tunes)$|^(?:resume|unpause)(?: the)?(?: music| song| spotify)?$", "music_play"),
     (r"^(?:pause|stop)(?: the| my)? (?:music|song|spotify|track)$|^pause$", "music_pause"),
     (r"^(?:next|skip)(?: this)?(?: song| track)?$|^skip it$", "music_next"),
@@ -469,6 +470,19 @@ PATTERNS = [
 def skill(text: str) -> str | None:
     """Handle a Mac request, or None if this isn't one."""
     t = text.strip().rstrip(".!?")
+    # two things at once: "open Spotify and play music"
+    parts = re.split(r",?\s+and (?:then )?(?=(?:open|close|play|pause|search|google|check|take|remind|set)\b)", t, flags=re.I)
+    if len(parts) > 1:
+        replies = []
+        for i, p in enumerate(parts):
+            r = skill(p)
+            if r is None:
+                return None if i == 0 else " ".join(replies) or None
+            replies.append(r)
+            if i == 0 and re.match(r"open ", p, re.I):
+                import time as _t
+                _t.sleep(2.5)  # let the app open before the next step
+        return " ".join(replies)
     from . import github
     gh = github.skill(t)
     if gh is not None:
@@ -487,6 +501,15 @@ def skill(text: str) -> str | None:
                 return remind(t)
             if kind == "list_reminders":
                 return list_reminders()
+            if kind == "canvas_any":
+                if re.match(r"^(open|close|go to|pull up)\b", t, re.I):
+                    continue
+                from . import canvas
+                if re.search(r"\bgrades?\b|\bscores?\b", t, re.I):
+                    return canvas.grades_sentence()
+                low = t.lower()
+                days = 1 if "today" in low else 2 if "tomorrow" in low else 7
+                return canvas.due_sentence(days)
             if kind == "close":
                 if re.search(r"\b(the )?(game|blackjack|timer|session)\b", g, re.I):
                     return None

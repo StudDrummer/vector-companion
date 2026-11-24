@@ -227,7 +227,8 @@ def repo_context(text: str) -> str:
                 readme = ""
         readme = re.sub(r"<[^>]+>|!\[[^\]]*\]\([^)]*\)|\[!\[.*?\)\]\(.*?\)", "", readme)
         readme = re.sub(r"\n{2,}", "\n", readme).strip()[:900]
-        out.append(f"{r['name']} is one of {login()}'s own projects. {r.get('desc') or ''}\n{readme}".strip())
+        owner = os.environ.get("VECTOR_OWNER", "") or "the user"
+        out.append(f"{r['name']} is {owner}'s own project (refer to it as 'your project'). {r.get('desc') or ''}\n{readme}".strip())
     return "\n\n".join(out)
 
 

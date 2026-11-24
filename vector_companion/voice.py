@@ -218,6 +218,12 @@ def respond_stream(text: str, history: list[dict] | None = None):
     if reply is not None:
         yield brain.speakable(reply)
         return
+    if PRIVATE.search(text):
+        # asks about your own accounts but nothing above could look it up: never let the model invent it
+        yield ("I can't see that from here, sir. I can check what's due on Canvas, your grades, your calendar, "
+               "your notes and GitHub." if brain._style() == "jarvis" else
+               "I can't see that. I can check Canvas, your calendar, your notes and GitHub.")
+        return
     from . import openjarvis as OJ
     if OJ.wants_deep(text):
         done = yield from _deep(text, history, brain, OJ)
@@ -255,6 +261,10 @@ def respond_stream(text: str, history: list[dict] | None = None):
         yield brain.speakable(rest)
     elif not first_done:
         yield "Sorry, I didn't catch that."
+
+
+PRIVATE = re.compile(r"\b(my|on my|in my)\s+(canvas|grades?|assignments?|calendar|schedule|e-?mails?|inbox|messages|texts|"
+                     r"reminders)\b|\bcanvas\b", re.I)
 
 
 def _deep(text: str, history, brain, OJ):

@@ -1533,8 +1533,13 @@ class Handler(BaseHTTPRequestHandler):
                         except OSError:
                             break
                         time.sleep(0.2)
-                    time.sleep(0.5)
-                    subprocess.run(["open", app], capture_output=True, timeout=20)
+                    time.sleep(0.8)
+                    for attempt in range(3):
+                        r = subprocess.run(["open", app], capture_output=True, text=True, timeout=20)
+                        log(f"reopened the app (try {attempt + 1}): rc={r.returncode} {r.stderr.strip()[:120]}")
+                        if r.returncode == 0:
+                            break
+                        time.sleep(2)
                 threading.Thread(target=relaunch, daemon=True).start()
             elif u.path == "/reconnect":
                 COMP.mark_dead("manual reconnect")

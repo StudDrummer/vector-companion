@@ -338,8 +338,8 @@ def today() -> dict:
     try:
         from .. import canvas
         if canvas.connected():
-            out["due"] = [{"title": i["title"], "course": canvas._short_course(i["course"]), "when": canvas._day(i["due"])}
-                          for i in canvas.upcoming(3) if not i["done"]][:5]
+            out["due"] = [{"title": canvas._clean_title(i["title"]), "course": canvas._short_course(i["course"]), "when": canvas._day(i["due"])}
+                          for i in canvas.upcoming(3) if not i["done"] and not i.get("overdue")][:5]
     except Exception:  # noqa: BLE001
         out["due"] = []
     if S.load()["weather"].get("enabled", True):

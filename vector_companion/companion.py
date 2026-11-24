@@ -1436,7 +1436,7 @@ class Reminders:
         if not canvas.connected():
             return
         tomorrow = canvas.now().date() + timedelta(days=1)
-        items = [i for i in canvas.upcoming(2) if not i["done"] and i["due"].date() == tomorrow]
+        items = [i for i in canvas.upcoming(2) if not i["done"] and not i.get("overdue") and i["due"].date() == tomorrow]
         if not items:
             return
         jarvis = S.load().get("persona", {}).get("style") == "jarvis"

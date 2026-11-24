@@ -109,11 +109,14 @@ def _upcoming(days: int) -> list[dict]:
                 due = _when(asg.get("due_at"))
                 if asg and due and due <= end and not any(i["title"] == asg.get("name") for i in items):
                     items.append({"title": asg.get("name", ""), "due": due, "course": t.get("context_name", ""),
-                                  "url": asg.get("html_url", ""), "done": False})
+                                  "url": asg.get("html_url", ""), "done": False,
+                                  "overdue": due < now_ - dt.timedelta(hours=2)})
         except Exception:  # noqa: BLE001
             pass
     elif feed():
         items = [i for i in _ics(feed()) if now_ - dt.timedelta(hours=2) <= i["due"] <= end]
+    for i in items:
+        i.setdefault("overdue", False)
     return sorted(items, key=lambda i: i["due"])
 
 
@@ -182,7 +185,9 @@ def due_sentence(days: int = 7, only: str = "") -> str:
     """only='today' / 'tomorrow' keeps just that day; otherwise the next `days` days."""
     if not connected():
         return "Canvas isn't connected yet. Add your Canvas token or calendar feed on the Connections page of the Vector app."
-    items = [i for i in upcoming(max(days, 2)) if not i["done"]]
+    allitems = [i for i in upcoming(max(days, 2)) if not i["done"]]
+    overdue = [i for i in allitems if i.get("overdue")]
+    items = [i for i in allitems if not i.get("overdue")]
     today = now().date()
     if only == "today":
         items = [i for i in items if i["due"].date() == today]
@@ -190,14 +195,16 @@ def due_sentence(days: int = 7, only: str = "") -> str:
         items = [i for i in items if i["due"].date() == today + dt.timedelta(days=1)]
     items = [i for i in items if not re.search(r"\b(thanksgiving|break|no school|holiday)\b", i["title"], re.I)
              or i.get("url", "").find("assignments") >= 0]
+    late = (f" Also {len(overdue)} past due on your to-do list: " + "; ".join(_clean_title(i["title"]) for i in overdue[:2])
+            + ("" if len(overdue) <= 2 else f", and {len(overdue) - 2} more") + ".") if overdue and not only == "tomorrow" else ""
     if not items:
-        return f"Nothing due on Canvas {only}." if only else f"Nothing due on Canvas in the next {days} days."
+        return (f"Nothing due on Canvas {only}." if only else f"Nothing due on Canvas in the next {days} days.") + late
     when = (lambda i: "") if only else (lambda i: f", due {_day(i['due'])}")
     parts = [f"{_clean_title(i['title'])} for {_short_course(i['course'])}{when(i)}" if i["course"]
              else f"{_clean_title(i['title'])}{when(i)}" for i in items[:4]]
     more = f" Plus {len(items) - 4} more." if len(items) > 4 else ""
     head = f"Due {only}: " if only else f"{len(items)} thing{'s' if len(items) != 1 else ''} due: "
-    return head + "; ".join(parts) + "." + more
+    return head + "; ".join(parts) + "." + more + late
 
 
 def _clean_title(t: str) -> str:
@@ -235,10 +242,14 @@ def context(days: int = 5) -> str:
     if not connected():
         return ""
     try:
-        items = [i for i in upcoming(days) if not i["done"]]
+        allitems = [i for i in upcoming(days) if not i["done"]]
+        items = [i for i in allitems if not i.get("overdue")]
+        overdue = [i for i in allitems if i.get("overdue")]
     except Exception:  # noqa: BLE001
         return ""
+    late = ("\nPast due (still on the to-do list):\n" + "\n".join(f"- {_clean_title(i['title'])} ({_short_course(i['course'])})"
+                                                           for i in overdue[:5])) if overdue else ""
     if not items:
-        return "Canvas: nothing due in the next few days."
+        return "Canvas: nothing due in the next few days." + late
     return "Canvas, due soon:\n" + "\n".join(
-        f"- {i['title']} ({_short_course(i['course'])}) due {i['due'].strftime('%a %b %-d %-I:%M %p')}" for i in items[:10])
+        f"- {_clean_title(i['title'])} ({_short_course(i['course'])}) due {i['due'].strftime('%a %b %-d %-I:%M %p')}" for i in items[:10]) + late

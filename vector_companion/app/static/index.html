@@ -248,6 +248,10 @@
       </div>
       <div class="group-title">Things to say</div>
       <div class="group tips">
+        <div class="row"><div class="rl">"open Canvas" · "open Instagram" · "open Notes" · "search YouTube for mitosis"</div></div>
+        <div class="row"><div class="rl">"check my calendar" · "what's due tomorrow" · "what are my grades" · "what should I do next"</div></div>
+        <div class="row"><div class="rl">"take a note: bio test moved to Friday" · "read my note about chem"</div></div>
+        <div class="row"><div class="rl">"ask Claude what to do next" · "ask Claude how to balance a redox equation"</div></div>
         <div class="row"><div class="rl">"what's the weather" · "do I need a jacket tomorrow"</div></div>
         <div class="row"><div class="rl">"check my homework" · "read this" · "what am I holding"</div></div>
         <div class="row"><div class="rl">"start a focus timer" · "how much time is left" · "stop the timer"</div></div>
@@ -335,6 +339,14 @@
       <div class="group">
         <div class="row"><div class="rl">OpenJarvis agent<small id="oj-sub">Research, email, calendar and multi-step requests go to Stanford's OpenJarvis agent running on this Mac. Everyday questions stay on the fast path.</small></div><div class="rr" id="oj-state">--</div></div>
         <div class="row"><div class="rl">Use it for big requests<small>"Jarvis, research...", "what's on my calendar", "summarize my inbox", "plan my week"</small></div><div class="rr"><label class="sw"><input type="checkbox" data-k="openjarvis.enabled"><span></span></label></div></div>
+      </div>
+      <div class="group-title">Connections</div>
+      <div class="group">
+        <div class="row"><div class="rl">Canvas<small id="cv-sub">Say "what's due tomorrow", "what are my grades", "open Canvas"</small></div><div class="rr" id="cv-state">--</div></div>
+        <div class="row"><div class="rl">Canvas address</div><div class="rr grow"><input id="cv-url" class="field" placeholder="https://overlake.instructure.com"></div></div>
+        <div class="row"><div class="rl">Canvas access token<small>Canvas > Account > Settings > + New Access Token. Gives due dates and grades. Stays on this Mac.</small></div><div class="rr grow"><input id="cv-token" class="field" type="password" placeholder="paste token (leave blank to keep)"></div></div>
+        <div class="row"><div class="rl">Or: Canvas calendar feed<small>Canvas > Calendar > Calendar Feed (bottom right). Due dates only; works if tokens are turned off.</small></div><div class="rr grow"><input id="cv-ics" class="field" type="password" placeholder="https://overlake.instructure.com/feeds/calendars/..."></div></div>
+        <div class="row"><div class="rl">Mac Calendar &amp; Notes<small id="cal-sub">"Check my calendar", "take a note: ...", "read my note about chem". macOS asks once to allow it.</small></div><div class="rr"><button class="btn small" id="conn-test">Test</button> <button class="btn primary small" id="conn-save">Save</button></div></div>
       </div>
       <div class="group-title">Reports</div>
       <div class="group" id="reports"><div class="empty">Nothing yet. Ask Jarvis to research something.</div></div>

@@ -513,6 +513,10 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json({"today": study_today()})
             if path == "/api/ears":
                 return self._json(ears_status())
+            if path == "/api/connections":
+                env = S.read_env()
+                return self._json({"canvas_url": env.get("CANVAS_URL", "https://overlake.instructure.com"),
+                                   "has_token": bool(env.get("CANVAS_TOKEN")), "has_feed": bool(env.get("CANVAS_ICS"))})
             if path == "/api/reports":
                 from .. import openjarvis as OJ
                 out = []
@@ -606,6 +610,31 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/settings":
                 return self._json({"app": S.save(b.get("app", {})),
                                    "brain": save_brain(b["brain"]) if "brain" in b else brain_settings()})
+            if path == "/api/connections":
+                up = {}
+                url_ = str(b.get("canvas_url", "")).strip().rstrip("/")
+                if url_:
+                    up["CANVAS_URL"] = url_ if url_.startswith("http") else "https://" + url_
+                for k, env_k in (("canvas_token", "CANVAS_TOKEN"), ("canvas_ics", "CANVAS_ICS")):
+                    v = str(b.get(k, "")).strip()
+                    if v:
+                        up[env_k] = v
+                if up:
+                    S.write_env(up)
+                return self._json({"ok": True})
+            if path == "/api/connections/test":
+                from .. import canvas, mac
+                out = {}
+                try:
+                    canvas._cache.clear()
+                    out["canvas"] = canvas.due_sentence(7)
+                except Exception as e:  # noqa: BLE001
+                    out["canvas"] = f"Canvas error: {str(e)[:120]}"
+                try:
+                    out["calendar"] = mac.calendar_sentence("today")
+                except Exception as e:  # noqa: BLE001
+                    out["calendar"] = f"Calendar error: {str(e)[:120]}"
+                return self._json(out)
             if path == "/api/openjarvis/configure":
                 from .. import openjarvis as OJ
                 return self._json({"ok": True, "config": OJ.configure()})

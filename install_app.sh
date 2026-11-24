@@ -33,6 +33,7 @@ cat > "$APP/Contents/Info.plist" <<EOF
   <key>CFBundleShortVersionString</key><string>1.0</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleExecutable</key><string>Vector</string>
+  <key>NSAppleEventsUsageDescription</key><string>Jarvis reads your Calendar and Notes when you ask him to.</string>
   <key>CFBundleIconFile</key><string>AppIcon</string>
   <key>LSMinimumSystemVersion</key><string>11.0</string>
   <key>NSHighResolutionCapable</key><true/>
@@ -71,6 +72,7 @@ cat > "$EARS/Contents/Info.plist" <<EOF
   <key>LSUIElement</key><true/>
   <key>LSArchitecturePriority</key><array><string>arm64</string><string>x86_64</string></array>
   <key>NSMicrophoneUsageDescription</key><string>Vector listens for "Hey Jarvis" so you can talk to your robot. Audio stays on this Mac.</string>
+  <key>NSAppleEventsUsageDescription</key><string>Jarvis reads your Calendar and Notes and opens apps when you ask him to.</string>
 </dict></plist>
 EOF
 # A tiny native launcher: macOS only grants the microphone to a real app binary (not a shell script).

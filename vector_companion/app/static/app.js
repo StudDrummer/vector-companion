@@ -416,6 +416,20 @@ $("#lb-del").addEventListener("click", async e => {
 let SET = null;
 const KEY_HELP = { anthropic: ["Anthropic API key", "console.anthropic.com"], chatgpt: ["OpenAI API key", "platform.openai.com"],
   gemini: ["Gemini API key", "aistudio.google.com (free tier available)"] };
+async function loadConnections() {
+  let c = {}; try { c = await api("/api/connections"); } catch { return; }
+  $("#cv-url").value = c.canvas_url || "";
+  $("#cv-state").innerHTML = c.has_token ? '<span class="ok">Token saved</span>' : c.has_feed ? '<span class="ok">Feed saved</span>' : '<span class="mute">Not connected</span>';
+}
+$("#conn-save").addEventListener("click", async () => {
+  await tryApi("/api/connections", { canvas_url: $("#cv-url").value.trim(), canvas_token: $("#cv-token").value.trim(), canvas_ics: $("#cv-ics").value.trim() }, "Saved");
+  $("#cv-token").value = ""; $("#cv-ics").value = ""; loadConnections();
+});
+$("#conn-test").addEventListener("click", async () => {
+  $("#cv-sub").textContent = "Checking..."; $("#cal-sub").textContent = "Checking (macOS may ask to allow Calendar)...";
+  let r = {}; try { r = await api("/api/connections/test", {}); } catch { }
+  $("#cv-sub").textContent = r.canvas || "No answer"; $("#cal-sub").textContent = r.calendar || "No answer";
+});
 async function loadReports() {
   let r = {}; try { r = await api("/api/reports"); } catch { return; }
   $("#oj-state").innerHTML = r.openjarvis ? '<span class="ok">Running</span>' : '<span class="mute">Not running</span>';
@@ -424,7 +438,7 @@ async function loadReports() {
     : '<div class="empty">Nothing yet. Ask Jarvis to research something.</div>';
 }
 async function loadBrain() {
-  loadK("#brain"); loadReports();
+  loadK("#brain"); loadReports(); loadConnections();
   try { SET = await api("/api/settings"); } catch { return; }
   const br = SET.brain;
   segSet("#provider", br.provider); await providerUI(br.model);

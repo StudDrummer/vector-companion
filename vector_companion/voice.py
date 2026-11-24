@@ -209,6 +209,11 @@ def respond_stream(text: str, history: list[dict] | None = None):
     if action:
         yield run_vector_command(action)
         return
+    from . import mac
+    reply = mac.skill(text) if sys.platform == "darwin" else None
+    if reply is not None:
+        yield brain.speakable(reply)
+        return
     reply = brain.local_skill(text)
     if reply is not None:
         yield brain.speakable(reply)
@@ -219,6 +224,13 @@ def respond_stream(text: str, history: list[dict] | None = None):
         if done:
             return
     msgs, _ = brain.build_messages((history or [])[-8:] + [{"role": "user", "content": text}])
+    try:
+        ctx = mac.plan_context(text)
+    except Exception:  # noqa: BLE001
+        ctx = ""
+    if ctx:
+        msgs[0]["content"] += ("\nHere is what " + brain.OWNER + " actually has coming up. Base your advice on it, "
+                               "picking the single most urgent thing first:\n" + ctx)
     msgs[0]["content"] += ("\nYou are speaking out loud right now: answer in at most two short sentences. "
                            "Never make up what " + brain.OWNER + " is doing or has been doing.")
     buf, first_done = "", False

@@ -510,6 +510,15 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json({"today": study_today()})
             if path == "/api/ears":
                 return self._json(ears_status())
+            if path == "/api/reports":
+                from .. import openjarvis as OJ
+                out = []
+                d = S.DATA_DIR / "reports"
+                for f in sorted(d.glob("*.md"), reverse=True)[:12] if d.exists() else []:
+                    t = f.read_text(errors="ignore")
+                    out.append({"title": t.splitlines()[0].lstrip("# ")[:120] if t else f.stem, "when": f.stem,
+                                "text": "\n".join(t.splitlines()[2:])[:20000]})
+                return self._json({"reports": out, "openjarvis": OJ.available()})
             if path == "/api/tts":
                 from .. import tts
                 return self._json(tts.status())

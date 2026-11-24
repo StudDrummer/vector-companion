@@ -31,8 +31,11 @@ def bot() -> Vector:
 
 @mcp.tool()
 def vector_say(text: str) -> str:
-    """Make Vector speak the text out loud (keep it short and plain; no markdown)."""
-    bot().say(text)
+    """Say the text out loud in Jarvis's voice (keep it short and plain; no markdown)."""
+    try:
+        _c("/say", {"text": text[:400]}, timeout=60)
+    except Exception:  # noqa: BLE001  (companion not running: his own voice via wire-pod)
+        bot().say(text)
     return "spoken"
 
 

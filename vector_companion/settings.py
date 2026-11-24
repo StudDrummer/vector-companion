@@ -45,6 +45,8 @@ DEFAULTS: dict = {
     # "Hey Jarvis" through the Mac's microphone (Vector Ears)
     "ears": {"enabled": True, "mode": "vector", "wake_word": "jarvis", "sensitivity": 0.5, "follow_up": True, "chime": True},
     "guard": {"notify": True, "save_photos": True},
+    # Stanford OpenJarvis agent server (jarvis serve) for research / email / calendar / multi-step requests
+    "openjarvis": {"enabled": True, "url": "http://127.0.0.1:8000", "model": "qwen3.5:4b"},
     "weather": {"enabled": True, "place": "Bellevue, WA", "units": "fahrenheit"},
 }
 

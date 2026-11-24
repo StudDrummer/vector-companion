@@ -213,6 +213,11 @@ def respond_stream(text: str, history: list[dict] | None = None):
     if reply is not None:
         yield brain.speakable(reply)
         return
+    from . import openjarvis as OJ
+    if OJ.wants_deep(text):
+        done = yield from _deep(text, history, brain, OJ)
+        if done:
+            return
     msgs, _ = brain.build_messages((history or [])[-8:] + [{"role": "user", "content": text}])
     msgs[0]["content"] += ("\nYou are speaking out loud right now: answer in at most two short sentences. "
                            "Never make up what " + brain.OWNER + " is doing or has been doing.")
@@ -231,6 +236,37 @@ def respond_stream(text: str, history: list[dict] | None = None):
         yield brain.speakable(rest)
     elif not first_done:
         yield "Sorry, I didn't catch that."
+
+
+def _deep(text: str, history, brain, OJ):
+    """Hand real work (research, email, calendar, planning) to the OpenJarvis agent. Says it's on it,
+    then speaks the first few sentences of the result; the full answer is saved as a report."""
+    jarvis = brain._style() == "jarvis"
+    yield "On it, sir." if jarvis else "On it."
+    sys_prompt = (brain.persona() + "\nYou have tools: use them. Your answer will be read aloud first, so start "
+                  "with a two or three sentence plain-English summary, then give the details below it.")
+    msgs = [{"role": "system", "content": sys_prompt}] + list((history or [])[-6:]) + [{"role": "user", "content": text}]
+    full, buf, said = "", "", 0
+    try:
+        for chunk in OJ.stream(msgs):
+            full += chunk
+            buf += chunk
+            while said < 3:
+                m = re.search(r"^(.{12,}?[.!?])(\s+)", buf, re.S)
+                if not m:
+                    break
+                yield brain.speakable(m.group(1).strip())
+                buf, said = buf[m.end():], said + 1
+    except Exception as e:  # noqa: BLE001
+        S.log("voice", f"OpenJarvis failed: {e}")
+        if not full:
+            return False  # fall back to the quick brain
+    if said < 3 and buf.strip():
+        yield brain.speakable(buf.strip()[:300])
+    OJ.save_report(text, full)
+    if len(full) > 400:
+        yield "The full write-up is in the Vector app, sir." if jarvis else "The full answer is in the Vector app."
+    return True
 
 
 def handle(text: str) -> None:

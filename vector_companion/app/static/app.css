@@ -249,3 +249,6 @@ kbd{display:inline-block;min-width:20px;padding:0 5px;border-radius:5px;backgrou
 .now .bar{height:3px;border-radius:2px;background:rgba(127,127,127,.25);margin-top:6px;overflow:hidden}
 .now .bar i{display:block;height:100%;background:var(--green)}
 .bj .rl small b{color:var(--txt)}
+
+.report{display:block}.report summary{cursor:pointer;list-style:none}.report summary::-webkit-details-marker{display:none}
+.rtext{white-space:pre-wrap;font:13px/1.5 -apple-system,system-ui,sans-serif;color:var(--txt2);margin:8px 0 4px;max-height:360px;overflow:auto}

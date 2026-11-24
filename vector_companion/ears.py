@@ -34,7 +34,34 @@ QUICK = os.environ.get("EARS_QUICK_MODEL", "tiny.en")  # tiny model that only ch
 WAKE_WORDS = {"jarvis": "Jarvis", "hey_jarvis": "Hey Jarvis", "hey_mycroft": "Hey Mycroft", "alexa": "Alexa"}
 # how Whisper tends to spell "Jarvis" when it's said fast
 NAME = re.compile(r"\b(jarvis|jarvas|jarvi|jervis|javis|jarviss|jaarvis|garvis|charvis|j\.a\.r\.v\.i\.s)\b", re.I)
-END_QUIET = 7  # 80 ms frames of quiet that end a sentence (0.56 s)
+END_QUIET = 7  # 80 ms frames of quiet that end a sentence (0.56 s) when the turn model isn't available
+TURN_URL = "https://huggingface.co/soniqo/Smart-Turn-v3.2-ONNX/resolve/main/smart-turn-v3.2-int8.onnx"
+TURN_FILE = S.DATA_DIR / "models" / "smart-turn-v3.2-int8.onnx"
+
+
+class SmartTurn:
+    """Pipecat's Smart Turn v3 (open, 8 MB, ~35 ms): listens to HOW you speak (intonation, trailing off)
+    to tell 'finished' from 'pausing to think'. Lets him answer after ~0.25 s of quiet when you're done,
+    and wait longer when you're mid-thought."""
+
+    def __init__(self):
+        import onnxruntime as ort
+        if not TURN_FILE.exists():
+            import urllib.request
+            TURN_FILE.parent.mkdir(parents=True, exist_ok=True)
+            tmp = TURN_FILE.with_suffix(".part")
+            urllib.request.urlretrieve(TURN_URL, tmp)
+            tmp.rename(TURN_FILE)
+        opts = ort.SessionOptions()
+        opts.intra_op_num_threads = 2
+        self.s = ort.InferenceSession(str(TURN_FILE), opts, providers=["CPUExecutionProvider"])
+
+    def done(self, frames) -> float:
+        import numpy as np
+        a = np.concatenate(frames[-100:]).astype(np.float32) / 32768.0  # last 8 s
+        x = np.zeros(128000, dtype=np.float32)
+        x[-len(a):] = a[-128000:]
+        return float(self.s.run(None, {"audio": x[None]})[0][0][0])
 MIC_OFF = re.compile(r"\b(stop listening|mic off|turn off (the |your )?(mic|microphone|listening)|mute (the |your )?(mic|microphone))\b", re.I)
 STOP_WORDS = re.compile(r"^(never ?mind|stop|cancel|nothing|that'?s all|thanks?,? (that'?s all|jarvis)|thank you,? jarvis)\W*$", re.I)
 
@@ -65,6 +92,7 @@ class Ears:
         self.game = False
         self.handed_off = False
         self.noise = 200.0
+        self.turn = None
 
     _prefs = (0.0, {})
 
@@ -94,6 +122,11 @@ class Ears:
         from faster_whisper import WhisperModel
         WhisperModel(WHISPER, device="cpu", compute_type="int8")
         WhisperModel(QUICK, device="cpu", compute_type="int8")
+        try:
+            SmartTurn()
+            print("   smart turn detection ready")
+        except Exception as e:  # noqa: BLE001
+            print("   smart turn download failed:", e)
         print("   ears ready", openwakeword.__version__ if hasattr(openwakeword, "__version__") else "")
 
     @staticmethod
@@ -115,6 +148,12 @@ class Ears:
             self.wake = self._wake_model()
         self.stt = None
         self.quick = None
+        try:
+            self.turn = SmartTurn()
+            log("smart turn detection on")
+        except Exception as e:  # noqa: BLE001
+            self.turn = None
+            log(f"smart turn unavailable ({str(e)[:80]}); using a fixed pause")
         self._stt()  # load now so the first "Jarvis" isn't slow
         self._quick()
         import numpy as np
@@ -221,8 +260,21 @@ class Ears:
                 continue
             frames.append(f)
             quiet = 0 if loud else quiet + 1
-            if quiet >= END_QUIET or len(frames) * FRAME / SR > 15:
+            if (quiet and self.finished(frames, quiet)) or len(frames) * FRAME / SR > 15:
                 return frames
+
+    def finished(self, frames, quiet: int) -> bool:
+        """Has the speaker finished? quiet = trailing 80 ms frames of silence."""
+        if self.turn is None:
+            return quiet >= END_QUIET
+        if quiet >= 14:  # 1.1 s of silence: done regardless
+            return True
+        if quiet in (3, 6, 9, 12):  # check at 0.24 s, then every 0.24 s
+            try:
+                return self.turn.done(frames) >= 0.5
+            except Exception:  # noqa: BLE001
+                return quiet >= END_QUIET
+        return False
 
     def transcribe(self, frames, raw: bool = False) -> str:
         import numpy as np
@@ -451,12 +503,12 @@ class Ears:
             seg.append(f)
             quiet = 0 if loud else quiet + 1
             dur = len(seg) * FRAME / SR
-            if quiet < END_QUIET and dur < 15:
+            if not (quiet and self.finished(seg, quiet)) and dur < 15:
                 continue
             frames, hit, was_cued, best = seg, oww_hit, cued, seg_score
             seg, quiet, oww_hit, cued, seg_score = [], 0, False, False, 0.0
             lead.clear()
-            if dur - END_QUIET * FRAME / SR < 0.3:
+            if dur - quiet * FRAME / SR < 0.3:
                 continue  # a click or a cough
             t0 = time.time()
             if not hit and not self.heard_name(frames):

@@ -245,3 +245,25 @@ available. The SDK used here covers the camera, screen, motors, sensors, animati
 
 ## Credits
 wire-pod and WirePod by kercre123 (MIT). Vector SDK originally by Anki, maintained for wire-pod.
+
+
+## Deep brain: OpenJarvis (Stanford)
+
+Everyday questions stay on the fast voice path. Requests that need real work ("Jarvis, research...",
+"what's on my calendar", "summarize my inbox", "plan my week", "compare...") go to
+[OpenJarvis](https://github.com/open-jarvis/OpenJarvis), Stanford's local-first agent framework,
+running on this Mac. Jarvis says "On it, sir.", speaks a short summary when it's done, and saves the
+full write-up under Brain & Memory > Reports.
+
+    ./setup_openjarvis.sh      # installs OpenJarvis (local only, no analytics), a tool-calling model,
+                               # registers Vector as an MCP tool server, and starts it at login
+
+Vector is exposed to any agent framework that speaks MCP (OpenJarvis, Hermes Agent, OpenClaw,
+nanobot, Claude) through `python -m vector_companion.mcp_server`; `skills/vector-desk-robot/SKILL.md`
+teaches them how to use him.
+
+## Turn-taking
+
+Ears uses Pipecat's open Smart Turn v3 model (8 MB, ~35 ms per check) to hear when you've finished
+a sentence from your intonation, so he answers after ~0.25 s of quiet when you're done and waits
+when you're only pausing.

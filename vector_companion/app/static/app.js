@@ -416,7 +416,15 @@ $("#lb-del").addEventListener("click", async e => {
 let SET = null;
 const KEY_HELP = { anthropic: ["Anthropic API key", "console.anthropic.com"], chatgpt: ["OpenAI API key", "platform.openai.com"],
   gemini: ["Gemini API key", "aistudio.google.com (free tier available)"] };
+async function loadReports() {
+  let r = {}; try { r = await api("/api/reports"); } catch { return; }
+  $("#oj-state").innerHTML = r.openjarvis ? '<span class="ok">Running</span>' : '<span class="mute">Not running</span>';
+  const list = r.reports || [];
+  $("#reports").innerHTML = list.length ? list.map(x => `<details class="row report"><summary class="rl">${esc(x.title)}<small>${esc(x.when)}</small></summary><pre class="rtext">${esc(x.text)}</pre></details>`).join("")
+    : '<div class="empty">Nothing yet. Ask Jarvis to research something.</div>';
+}
 async function loadBrain() {
+  loadK("#brain"); loadReports();
   try { SET = await api("/api/settings"); } catch { return; }
   const br = SET.brain;
   segSet("#provider", br.provider); await providerUI(br.model);

@@ -160,12 +160,12 @@ class Ears:
         self._stt().transcribe(np.zeros(SR, dtype=np.float32), language="en", beam_size=1)  # warm up
 
     @staticmethod
-    def _whisper(name: str, threads: int):
+    def _whisper(name: str, threads: int, gpu: bool = True):
         """Apple GPU (Metal) when this ctranslate2 supports it (about 2x faster), else the CPU."""
         import numpy as np
         from faster_whisper import WhisperModel
         tries = [("mps", "float16"), ("mps", "int8_float16")] if sys.platform == "darwin" and \
-            S.load()["ears"].get("gpu", True) else []
+            S.load()["ears"].get("gpu", True) and gpu else []
         for dev, ct in tries:
             try:
                 m = WhisperModel(name, device=dev, compute_type=ct)
@@ -184,7 +184,7 @@ class Ears:
     def _quick(self):
         if self.quick is None:
             try:
-                self.quick = self._whisper(QUICK, 2)
+                self.quick = self._whisper(QUICK, 2, gpu=False)  # tiny is quicker on the CPU (no GPU hand-off)
             except Exception as e:  # noqa: BLE001
                 log(f"quick model unavailable ({e}); using the main one")
                 self.quick = self._stt()
@@ -194,8 +194,12 @@ class Ears:
         """Fast check on the first ~3 s of a sentence: was Jarvis said? (~0.1 s)"""
         import numpy as np
         audio = np.concatenate(frames[: int(3.2 * SR / FRAME)]).astype(np.float32) / 32768.0
-        model = self._stt() if len(frames) * FRAME / SR < 1.6 else self._quick()  # a lone "Jarvis" needs the better ear
-        segs, _ = model.transcribe(audio, language="en", beam_size=1, vad_filter=False,
+        short = len(frames) * FRAME / SR < 1.6
+        if short:  # a lone "Jarvis" needs the better ear; and then that transcript is the final one
+            self._last_full = self.transcribe(frames, raw=True)
+            return bool(NAME.search(self._last_full))
+        self._last_full = None
+        segs, _ = self._quick().transcribe(audio, language="en", beam_size=1, vad_filter=False,
                                            condition_on_previous_text=False, without_timestamps=True)
         return bool(NAME.search(" ".join(x.text for x in segs)))
 
@@ -519,7 +523,8 @@ class Ears:
             if not was_cued:
                 self.cue()
             check = time.time() - t0
-            text = self.transcribe(frames, raw=True)
+            text = (getattr(self, "_last_full", None) if not hit else None) or self.transcribe(frames, raw=True)
+            self._last_full = None
             if not NAME.search(text) and not (hit and best >= 0.8):
                 log(f"false alarm (quick check heard the name, full pass heard {text[:60]!r})")
                 continue

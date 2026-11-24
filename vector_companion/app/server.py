@@ -606,13 +606,16 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/settings":
                 return self._json({"app": S.save(b.get("app", {})),
                                    "brain": save_brain(b["brain"]) if "brain" in b else brain_settings()})
+            if path == "/api/openjarvis/configure":
+                from .. import openjarvis as OJ
+                return self._json({"ok": True, "config": OJ.configure()})
             if path == "/api/openjarvis/diag":  # what OpenJarvis is configured with, and one raw agent answer
                 from .. import openjarvis as OJ
                 cfg = os.path.expanduser("~/.openjarvis/config.toml")
                 out = {"config": open(cfg).read()[-4000:] if os.path.exists(cfg) else None}
                 try:
                     req = urllib.request.Request(OJ.url() + "/v1/chat/completions", data=json.dumps(
-                        {"model": "default", "stream": False, "messages": [{"role": "user", "content": str(b.get("text") or "Search the web: what is today's top science headline? Give the link.")}]}).encode(),
+                        {"model": OJ.prefs().get("model") or "qwen3.5:4b", "stream": False, "messages": [{"role": "user", "content": str(b.get("text") or "Search the web: what is today's top science headline? Give the link.")}]}).encode(),
                         headers={"Content-Type": "application/json"})
                     with urllib.request.urlopen(req, timeout=120) as r:
                         out["raw"] = json.loads(r.read())

@@ -38,6 +38,7 @@ else
   echo "   [tools.mcp] already in $CFG (add Vector there by hand if it's missing)"
 fi
 
+"$PY" -m vector_companion.openjarvis --configure || true   # safe tools only: web + Vector (no shell/code)
 echo "4/4 Start at login (jarvis serve on 127.0.0.1:8000)"
 PLIST="$HOME/Library/LaunchAgents/com.rushil.openjarvis.plist"
 mkdir -p "$ROOT/logs" "$HOME/Library/LaunchAgents"

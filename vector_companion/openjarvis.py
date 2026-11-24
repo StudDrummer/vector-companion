@@ -57,7 +57,7 @@ def wants_deep(text: str) -> bool:
 
 def stream(messages: list[dict], timeout: float = 180):
     """Yield text as the OpenJarvis agent writes it."""
-    body = {"model": prefs().get("model") or "default", "messages": messages, "stream": True}
+    body = {"model": prefs().get("model") or "qwen3.5:4b", "messages": messages, "stream": True}
     req = urllib.request.Request(url() + "/v1/chat/completions", data=json.dumps(body).encode(),
                                  headers={"Content-Type": "application/json"})
     with urllib.request.urlopen(req, timeout=timeout) as r:
@@ -85,3 +85,60 @@ def save_report(question: str, text: str):
         (d / f"{stamp}.md").write_text(f"# {question}\n\n{text}\n")
     except OSError:
         pass
+
+
+# ------------------------------------------------------------------ setup
+SAFE_TOOLS = ["web_search", "http_request", "think", "calculator", "get_weather",
+              "vector_say", "vector_show_on_face", "vector_look", "vector_focus_timer", "vector_weather",
+              "vector_status", "vector_action", "vector_desk_guard", "vector_head_angle"]
+
+
+def configure() -> str:
+    """Point OpenJarvis at safe tools only (web + Vector; no shell or code execution from a voice
+    request) and at the tool-calling model, then restart it."""
+    import os
+    import subprocess
+    cfg = os.path.expanduser(os.environ.get("OPENJARVIS_CONFIG", "~/.openjarvis/config.toml"))
+    text = open(cfg).read() if os.path.exists(cfg) else ""
+    model = prefs().get("model") or "qwen3.5:4b"
+    tools_line = "enabled = [" + ", ".join(f'"{t}"' for t in SAFE_TOOLS) + "]"
+    lines, section, done_tools, done_model = text.splitlines(), "", False, False
+    out = []
+    for ln in lines:
+        s = ln.strip()
+        if s.startswith("[") and s.endswith("]"):
+            if section == "tools" and not done_tools:
+                out.append(tools_line)
+                done_tools = True
+            if section == "intelligence" and not done_model:
+                out.append(f'default_model = "{model}"')
+                done_model = True
+            section = s.strip("[]")
+        elif section == "tools" and s.startswith("enabled"):
+            ln, done_tools = tools_line, True
+        elif section == "intelligence" and s.startswith("default_model"):
+            ln, done_model = f'default_model = "{model}"', True
+        out.append(ln)
+    if section == "tools" and not done_tools:
+        out.append(tools_line)
+        done_tools = True
+    if not done_tools:
+        out += ["", "[tools]", tools_line]
+    if not done_model:
+        out += ["", "[intelligence]", f'default_model = "{model}"']
+    os.makedirs(os.path.dirname(cfg), exist_ok=True)
+    open(cfg, "w").write("\n".join(out) + "\n")
+    try:
+        subprocess.run(["launchctl", "kickstart", "-k", f"gui/{os.getuid()}/com.rushil.openjarvis"],
+                       capture_output=True, timeout=15)
+    except (OSError, subprocess.SubprocessError):
+        pass
+    global _up
+    _up = (0.0, False)
+    return cfg
+
+
+if __name__ == "__main__":
+    import sys
+    if "--configure" in sys.argv:
+        print("   configured", configure())

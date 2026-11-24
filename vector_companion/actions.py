@@ -74,12 +74,11 @@ class Actions:
     def run(self, action: str) -> dict:
         a = action.strip().lower()
         from .companion import OWNER as owner
-        if a in DRIVES:
-            if S.load()["safety"].get("dock_lock"):
-                raise PermissionError("He has to stay on the charger until his new battery is in (dock lock).")
-            from .wirepod import INTENTS, Vector  # best effort: these are his own driving behaviors
-            Vector().intent(INTENTS.get(a, a))
-            return {"sent": a}
+        if a in DRIVES or a == "go_to_charger":
+            from .motion import Motion
+            if not hasattr(self, "motion"):
+                self.motion = Motion(self.c)
+            return self.motion.start(a)
         if a == "blackjack":
             self.bj = Blackjack(self)
             threading.Thread(target=self.bj.deal, daemon=True).start()
@@ -130,10 +129,6 @@ class Actions:
         if a == "sleep":
             self.say("Good night, sir." if _jarvis() else "Okay, nap time.")
             self.anim("sleep")
-            return {}
-        if a == "go_to_charger":
-            with self.c.control() as r:
-                r.behavior.drive_on_charger()
             return {}
         if a == "take_photo":
             return self.photo()

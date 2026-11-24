@@ -47,7 +47,8 @@ OWNER = os.environ.get("VECTOR_OWNER", "Rushil")
 # per-call time limits (seconds); anything slower means the link is gone
 # An action that hangs (e.g. an animation waiting for something that never happens) blocks every later
 # action in his queue. After one of these times out, we hand control back, which clears his queue.
-QUEUED_ACTIONS = {"play_animation_trigger", "play_animation", "set_lift_height", "set_head_angle", "say_text",
+QUEUED_ACTIONS = {"pickup_object", "roll_cube", "pop_a_wheelie", "place_object_on_ground_here", "look_around_in_place",
+                  "turn_towards_face", "drive_off_charger", "play_animation_trigger", "play_animation", "set_lift_height", "set_head_angle", "say_text",
                   "drive_straight", "turn_in_place", "drive_on_charger"}
 TIMEOUTS = {"say_text": 45, "play_animation_trigger": 20, "drive_on_charger": 45, "drive_off_charger": 30,
             "capture_single_image": 12, "request_control": 8, "release_control": 5,

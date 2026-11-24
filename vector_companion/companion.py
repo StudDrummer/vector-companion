@@ -1605,10 +1605,34 @@ def _safe(fn, *a):
         log(traceback.format_exc(limit=3))
 
 
+def _quiet_sdk_logs():
+    """The SDK adds its own INFO handlers (every sound it plays); keep only warnings, and keep the
+    launch agent's .out files from growing forever (one had reached 1.8 GB)."""
+    for name in list(logging.root.manager.loggerDict):
+        if not name.startswith("vector_companion"):
+            lg = logging.getLogger(name)
+            lg.setLevel(logging.WARNING)
+            for h in lg.handlers:
+                h.setLevel(logging.WARNING)
+    for f in (S.ROOT / "logs").glob("*.out"):
+        try:
+            if f.stat().st_size > 20_000_000:
+                with open(f, "rb") as fh:
+                    fh.seek(-500_000, 2)
+                    tail = fh.read()
+                with open(f, "r+b") as fh:
+                    fh.truncate(0)
+                    fh.write(b"[trimmed]\n" + tail)
+        except OSError:
+            pass
+
+
 def main():
     global COMP
     log("companion starting")
     COMP = Companion()
+    _quiet_sdk_logs()
+    threading.Timer(20, _quiet_sdk_logs).start()  # again once the SDK has connected and added its loggers
     COMP.resume_focus()
     from . import tts
     threading.Thread(target=tts.warm, daemon=True).start()  # first sentence shouldn't wait for the voice to load

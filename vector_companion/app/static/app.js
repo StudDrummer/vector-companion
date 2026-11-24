@@ -86,11 +86,13 @@ const EYE_NAMES = Object.keys(EYES);
 let ST = {}, RS = {};
 function battInfo(b) {
   if (!b || b.battery_level === undefined) return null;
-  const lvl = b.battery_level, words = ["Very low", "Low", "Good", "Full"];
-  // a worn-out battery reads "full" on the charger but sits around 3.5 V; say what's really going on
-  const worn = b.battery_volts && b.battery_volts < 3.65 && b.is_on_charger_platform;
-  return { pct: worn ? 0.08 : ([0.12, 0.33, 0.66, 1][lvl] ?? 0.5), word: worn ? "Replace" : (words[lvl] ?? "--"),
-    charging: !worn && b.is_charging, onCharger: b.is_on_charger_platform, worn };
+  const lvl = b.battery_level, words = ["Very low", "Low", "Good", "Full"], v = b.battery_volts;
+  // On the dock Vector reports a charger-side voltage, not the battery's, so health is judged off the dock only.
+  const off = !b.is_on_charger_platform;
+  const worn = off && v && v < 3.45;  // that low while running means the battery can't hold a charge
+  const pct = off && v ? Math.max(0.05, Math.min(1, (v - 3.5) / 0.6)) : ([0.12, 0.33, 0.66, 1][lvl] ?? 0.5);
+  return { pct: worn ? 0.05 : pct, word: worn ? "Replace" : (words[lvl] ?? "--"),
+    charging: b.is_charging, onCharger: b.is_on_charger_platform, worn };
 }
 async function refreshStatus() {
   try { ST = await api("/api/status"); } catch { ST = {}; }

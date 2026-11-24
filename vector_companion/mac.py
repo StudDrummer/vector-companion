@@ -161,6 +161,7 @@ def calendar_sentence(text: str) -> str:
     try:
         evs = events(day, n)
     except Exception as e:  # noqa: BLE001
+        S.log("voice", f"calendar read failed: {e}")
         if "not allowed" in str(e).lower() or "-1743" in str(e):
             return "I need permission to read your calendar. Allow Vector Ears to control Calendar in System Settings, Privacy and Security, Automation."
         return "I couldn't read your calendar just now."

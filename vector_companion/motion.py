@@ -98,28 +98,33 @@ class Motion:
             pass
 
     def _cube(self, r, search: bool = True):
-        """The connected cube, looking for it (turning in place) if he can't see it yet."""
+        """The cube, looking for it (turning in place) if he can't see it yet. Works from what his camera
+        sees, so it doesn't need the cube's Bluetooth link (that's only for lights and taps)."""
+        from .companion import log
         cube = r.world.connected_light_cube
         if cube is None:
             try:
                 self.c.cube_pool.submit(r.world.connect_cube).result(timeout=25)
-            except Exception:  # noqa: BLE001
-                pass
-            cube = r.world.connected_light_cube
-        if cube is None:
-            raise RuntimeError("no cube connected")
-        if cube.is_visible or not search:
+                cube = r.world.connected_light_cube
+            except Exception as e:  # noqa: BLE001
+                log(f"motion: cube bluetooth not connected ({e.__class__.__name__}); finding it by sight")
+        cube = cube or r.world._light_cube.get(next(iter(r.world._light_cube)))
+        seen = lambda: bool(cube and cube.is_visible)  # noqa: E731
+        log(f"motion: cube connected={bool(r.world.connected_light_cube)} visible={seen()} "
+            f"on_charger={r.status.is_on_charger}")
+        if seen() or not search:
             return cube
-        self._call(lambda: r.behavior.set_head_angle(_deg(-5)), 10, "set_head_angle")
         self._call(lambda: r.behavior.set_lift_height(0.0), 10, "set_lift_height")
-        for _ in range(8):  # a full circle in 45-degree steps
-            time.sleep(0.6)
-            if cube.is_visible:
-                return cube
-            self._call(lambda: r.behavior.turn_in_place(_deg(45)), 15, "turn_in_place")
-        time.sleep(0.6)
-        if cube.is_visible:
-            return cube
+        for head in (-5, 10):  # look low first, then a little higher
+            self._call(lambda: r.behavior.set_head_angle(_deg(head)), 10, "set_head_angle")
+            for step in range(8):  # a full circle in 45-degree steps
+                time.sleep(1.2)  # give his vision a moment to recognise the markers
+                if seen():
+                    log(f"motion: cube spotted (head {head}, step {step})")
+                    return cube
+                self._call(lambda: r.behavior.turn_in_place(_deg(45)), 15, "turn_in_place")
+            if head == -5:  # maybe he's too close to it: back up a little and look again
+                self._call(lambda: r.behavior.drive_straight(_mm(-80), _speed(60)), 15, "drive_straight")
         raise RuntimeError("couldn't find the cube")
 
     def _face_turn(self, r) -> bool:

@@ -650,6 +650,8 @@ class Handler(BaseHTTPRequestHandler):
                 try:
                     canvas._cache.clear()
                     out["canvas"] = canvas.due_sentence(7)
+                    out["canvas_clock"] = {"now": canvas.now().isoformat(), "tz": str(canvas.LOCAL),
+                                           "first_due": [i["due"].isoformat() for i in canvas.upcoming(7)[:3]]}
                 except Exception as e:  # noqa: BLE001
                     out["canvas"] = f"Canvas error: {str(e)[:120]}"
                 try:

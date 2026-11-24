@@ -243,8 +243,10 @@ def _deep(text: str, history, brain, OJ):
     then speaks the first few sentences of the result; the full answer is saved as a report."""
     jarvis = brain._style() == "jarvis"
     yield "On it, sir." if jarvis else "On it."
-    sys_prompt = (brain.persona() + "\nYou have tools: use them. Your answer will be read aloud first, so start "
-                  "with a two or three sentence plain-English summary, then give the details below it.")
+    sys_prompt = (brain.persona() + "\nYou have tools: use them. For anything current or factual, call web_search "
+                  "first and only state what the results say; never invent studies, numbers or dates. Your answer will "
+                  "be read aloud first, so start with a two or three sentence plain-English summary, then give the "
+                  "details below it, then a 'Sources:' list of the links you used.")
     msgs = [{"role": "system", "content": sys_prompt}] + list((history or [])[-6:]) + [{"role": "user", "content": text}]
     full, buf, said = "", "", 0
     try:

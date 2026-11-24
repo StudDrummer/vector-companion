@@ -257,14 +257,19 @@ def _deep(text: str, history, brain, OJ):
                 m = re.search(r"^(.{12,}?[.!?])(\s+)", buf, re.S)
                 if not m:
                     break
-                yield brain.speakable(m.group(1).strip())
+                sent = m.group(1).strip()
+                if re.match(r"(sources?|references?|details?)\s*:", sent, re.I) or "\n" in sent:
+                    said = 3  # the summary is over; the rest is for reading, not listening
+                    break
+                yield brain.speakable(sent)
                 buf, said = buf[m.end():], said + 1
     except Exception as e:  # noqa: BLE001
         S.log("voice", f"OpenJarvis failed: {e}")
         if not full:
             return False  # fall back to the quick brain
-    if said < 3 and buf.strip():
-        yield brain.speakable(buf.strip()[:300])
+    tail = re.split(r"\n|(?i:sources?\s*:)", buf.strip())[0].strip()
+    if said < 3 and tail:
+        yield brain.speakable(tail[:300])
     OJ.save_report(text, full)
     if len(full) > 400:
         yield "The full write-up is in the Vector app, sir." if jarvis else "The full answer is in the Vector app."

@@ -227,8 +227,17 @@ async function loadToday() {
   $("#t-focus").textContent = t.focus ? `Timer: ${Math.ceil(t.focus.left_s / 60)} min left` : (t.study ? "Nice work" : "Not started yet");
   $("#t-todo").textContent = String(t.todo.length);
   $("#t-todo2").textContent = t.todo[0] ? t.todo[0] : "List is clear";
-  $("#t-next").textContent = t.next[0] ? t.next[0].split(":")[0] : "Nothing";
-  $("#t-next2").textContent = t.next[0] ? (t.next[0].split(":").slice(1).join(":").trim() || "") : "No reminders soon";
+  const rem = (t.reminders || [])[0], due = (t.due || [])[0];
+  if (rem) {
+    $("#t-next").textContent = new Date(rem.at * 1000).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+    $("#t-next2").textContent = rem.text;
+  } else if (due) {
+    $("#t-next").textContent = "Due " + due.when;
+    $("#t-next2").textContent = due.title + (due.course ? " · " + due.course : "") + ((t.due || []).length > 1 ? ` (+${t.due.length - 1} more)` : "");
+  } else {
+    $("#t-next").textContent = t.next[0] ? t.next[0].split(":")[0] : "Nothing";
+    $("#t-next2").textContent = t.next[0] ? (t.next[0].split(":").slice(1).join(":").trim() || "") : "No reminders or due work";
+  }
 }
 $("#ov-say").addEventListener("keydown", e => { if (e.key === "Enter") { say(e.target.value); e.target.value = ""; } });
 $("#dr-say").addEventListener("keydown", e => { if (e.key === "Enter") { say(e.target.value); e.target.value = ""; } });

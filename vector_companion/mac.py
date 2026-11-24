@@ -112,6 +112,15 @@ def open_thing(name: str) -> str:
     if re.match(r"^[\w-]+\.(com|org|net|edu|io|ai|gov|co|tv|us)$", n):
         subprocess.Popen(["open", "https://" + n])
         return f"Opening {n}{sir}."
+    # one of your projects? open it on GitHub
+    try:
+        from . import github
+        r = github.find_repo(n)
+        if r:
+            subprocess.Popen(["open", r["url"]])
+            return f"Opening {r['name']} on GitHub{sir}."
+    except Exception:  # noqa: BLE001
+        pass
     # not an app or a known site: try <name>.com (amazon -> amazon.com) if that domain exists
     slug = re.sub(r"[^a-z0-9]", "", n)
     if 2 < len(slug) < 30:
@@ -125,6 +134,54 @@ def open_thing(name: str) -> str:
             except OSError:
                 continue
     return f"I don't see an app or site called {name.strip()}{sir}."
+
+
+BROWSERS = (("Google Chrome", "chrome"), ("Safari", "safari"), ("Arc", "chrome"), ("Microsoft Edge", "chrome"),
+            ("Brave Browser", "chrome"))
+
+
+def _running(app: str) -> bool:
+    try:
+        return _osascript(f'return application {_q(app)} is running', timeout=5) == "true"
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def close_thing(name: str) -> str:
+    """Quit an app, or close the browser tabs for a site ("close Instagram")."""
+    n = re.sub(r"^(the|my)\s+", "", name.strip().lower()).strip(" .!?")
+    n = re.sub(r"\s+(app|website|site|page|tab|tabs)$", "", n)
+    sir = _style_sir()
+    apps = _apps()
+    app = APP_ALIASES.get(n) or next((os.path.basename(v)[:-4] for k, v in apps.items() if k == n), None)
+    site = SITES.get(n) or (f"{n}.com" if " " not in n else None)
+    if n == "canvas":
+        from . import canvas
+        site = canvas.base()
+    closed = 0
+    if site:
+        host = re.sub(r"^https?://(www\.)?", "", site).split("/")[0]
+        for browser, kind in BROWSERS:
+            if not _running(browser):
+                continue
+            if kind == "safari":
+                script = (f'tell application "Safari" to repeat with w in windows\n'
+                          f'repeat with t in (tabs of w whose URL contains {_q(host)})\nclose t\nend repeat\nend repeat')
+            else:
+                script = (f'set n to 0\ntell application {_q(browser)} to repeat with w in windows\n'
+                          f'repeat with t in (tabs of w whose URL contains {_q(host)})\nclose t\nset n to n + 1\n'
+                          'end repeat\nend repeat\nreturn n')
+            try:
+                out = _osascript(script)
+                closed += int(out) if out.isdigit() else 1
+            except Exception:  # noqa: BLE001
+                pass
+        if closed:
+            return f"Closed {name.strip().title()}{sir}."
+    if app and _running(app):
+        _osascript(f'tell application {_q(app)} to quit')
+        return f"{app} closed{sir}."
+    return f"{name.strip().title()} isn't open{sir}."
 
 
 def search(where: str, query: str) -> str:
@@ -270,6 +327,7 @@ def _player() -> str:
 
 
 def music(cmd: str, query: str = "") -> str:
+    import time as _t
     app, sir = _player(), _style_sir()
     if cmd == "play":
         if query:
@@ -278,9 +336,14 @@ def music(cmd: str, query: str = "") -> str:
                 return f"I've pulled up {query} in Spotify{sir}. Press play on the one you want."
             _osascript(f'tell application "Music" to play (first track of library playlist 1 whose name contains {_q(query)} or artist contains {_q(query)})')
             return f"Playing {query}{sir}."
+        if not _running(app) and app == "Spotify":
+            subprocess.Popen(["open", "-a", "Spotify"])
+            _t.sleep(3)
         _osascript(f'tell application "{app}" to play')
         return now_playing(prefix="Playing")
     if cmd == "pause":
+        if not _running(app):
+            return f"Nothing is playing{sir}."
         _osascript(f'tell application "{app}" to pause')
         return f"Paused{sir}."
     if cmd == "next":
@@ -294,8 +357,10 @@ def music(cmd: str, query: str = "") -> str:
 
 def now_playing(prefix: str = "This is") -> str:
     import time as _t
-    _t.sleep(0.6)
     app = _player()
+    if not _running(app):
+        return f"{app} isn't open{_style_sir()}. Say open {app} and pick something to play."
+    _t.sleep(0.5)
     try:
         out = _osascript(f'tell application "{app}" to if player state is playing then return (name of current track) & " by " & (artist of current track)')
     except Exception:  # noqa: BLE001
@@ -305,8 +370,84 @@ def now_playing(prefix: str = "This is") -> str:
     return f"{prefix} {out}{_style_sir()}."
 
 
+# ------------------------------------------------------------------ reminders and timers
+NUM = {"a": 1, "an": 1, "one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7, "eight": 8,
+       "nine": 9, "ten": 10, "fifteen": 15, "twenty": 20, "thirty": 30, "forty five": 45, "forty-five": 45,
+       "half an": 0.5, "a half": 0.5}
+
+
+def parse_when(t: str) -> dt.datetime | None:
+    """'in 20 minutes', 'in an hour', 'at 5', 'at 5:30 pm', 'tomorrow at 7 am'."""
+    now = dt.datetime.now()
+    m = re.search(r"\b(?:in|for) (\d+(?:\.\d+)?|" + "|".join(sorted(NUM, key=len, reverse=True)) + r") (seconds?|minutes?|mins?|hours?|hrs?)\b", t)
+    if m:
+        n = float(m.group(1)) if m.group(1)[0].isdigit() else NUM[m.group(1)]
+        unit = m.group(2)
+        secs = n * (1 if unit.startswith("sec") else 3600 if unit.startswith("h") else 60)
+        return now + dt.timedelta(seconds=secs)
+    if re.search(r"\bin half an hour\b", t):
+        return now + dt.timedelta(minutes=30)
+    m = re.search(r"\bat (\d{1,2})(?::(\d{2}))?\s*(a\.?m\.?|p\.?m\.?)?", t)
+    if m:
+        h, mi, ap = int(m.group(1)), int(m.group(2) or 0), (m.group(3) or "").replace(".", "")
+        if ap == "pm" and h < 12:
+            h += 12
+        elif ap == "am" and h == 12:
+            h = 0
+        elif not ap and h < 8:
+            h += 12  # "at 5" means 5 pm
+        when = now.replace(hour=h % 24, minute=mi, second=0, microsecond=0)
+        if "tomorrow" in t or when <= now:
+            when += dt.timedelta(days=1)
+        return when
+    return None
+
+
+def remind(t: str) -> str:
+    from .companion_client import call
+    sir = _style_sir()
+    timer = re.search(r"\b(set )?(a )?timer\b", t, re.I)
+    when = parse_when(t.lower())
+    if not when:
+        return f"When should I remind you{sir}? Say something like in 20 minutes, or at 5 PM."
+    if timer:
+        what = "Timer's done"
+    else:
+        m = re.search(r"remind me (?:to |about |that )?(.+?)(?:\s+(?:in|at|tomorrow)\b.*)?$", t, re.I) or \
+            re.search(r"remind me (?:in|at) .+? (?:to|about|that) (.+)$", t, re.I)
+        what = (m.group(1) if m else "").strip() or "your reminder"
+        if re.match(r"(in|at) ", what):
+            m2 = re.search(r"\b(?:to|about|that) (.+)$", t, re.I)
+            what = m2.group(1) if m2 else "your reminder"
+    call("/remind", {"text": what, "at": when.timestamp()}, timeout=5)
+    mins = round((when - dt.datetime.now()).total_seconds() / 60)
+    if timer:
+        return f"Timer set for {mins} minute{'s' if mins != 1 else ''}{sir}." if mins < 120 else f"Timer set{sir}."
+    if mins < 90:
+        return f"I'll remind you in {max(1, mins)} minute{'s' if mins != 1 else ''}{sir}."
+    return f"I'll remind you at {when.strftime('%-I:%M %p')}{' tomorrow' if when.date() > dt.date.today() else ''}{sir}."
+
+
+def list_reminders() -> str:
+    from .companion_client import call
+    r = call("/reminders", timeout=5).get("reminders", [])
+    if not r:
+        return f"No reminders set{_style_sir()}."
+    parts = [f"{x['text']} at {dt.datetime.fromtimestamp(x['at']).strftime('%-I:%M %p')}" for x in r[:4]]
+    return "Reminders: " + "; ".join(parts) + "."
+
+
+HELP = ("I can open apps and sites, check your calendar and Canvas, take notes, play and pause music, set "
+        "reminders and timers, start a study session, quiz you, research things, check GitHub, ask Claude, "
+        "read your homework through my camera, guard your desk, and play blackjack.")
+
+
 # ------------------------------------------------------------------ router
 PATTERNS = [
+    (r"^what can you do|^what are you able to do|^help$|^what can i (say|ask)", "help"),
+    (r"\bremind me\b|\bset (?:a |an )?(?:timer|alarm|reminder)\b|\btimer for\b", "remind"),
+    (r"\b(what are )?my reminders\b|\bwhat reminders\b", "list_reminders"),
+    (r"^(?:can you |please )?(?:close|quit|exit|shut) (?:down )?(.+)$", "close"),
     (r"^(?:play|resume|start|put on)(?: some| my)? (?:music|songs?|spotify|tunes)$|^(?:resume|unpause)(?: the)?(?: music| song| spotify)?$", "music_play"),
     (r"^(?:pause|stop)(?: the| my)? (?:music|song|spotify|track)$|^pause$", "music_pause"),
     (r"^(?:next|skip)(?: this)?(?: song| track)?$|^skip it$", "music_next"),
@@ -316,7 +457,7 @@ PATTERNS = [
     (r"^(?:can you |please )?(?:ask|tell) claude (?:to |about )?(.+)$", "claude"),
     (r"^(?:can you |please )?(?:search|look up) (youtube|google scholar|scholar|pubmed|google) for (.+)$", "search"),
     (r"^(?:can you |please )?google (.+)$", "google"),
-    (r"^(?:can you |please )?(?:open|launch|pull up|bring up|start|go to) (.+)$", "open"),
+    (r"^(?:can you |please )?(?:open|launch|pull up|bring up|go to) (.+)$", "open"),
     (r"\b(what'?s|what is|anything) (on|in) my (calendar|schedule)\b|\bcheck my (calendar|schedule)\b|\bmy (calendar|schedule) (today|tomorrow|this week)\b|\bdo i have anything (today|tomorrow|this week)\b", "calendar"),
     (r"\bwhat'?s due\b|\bdue (today|tomorrow|this week|soon)\b|\b(my )?(canvas|homework|assignments)( due)?\b.*\b(today|tomorrow|this week|due|left)\b|\bwhat (homework|assignments) do i have\b", "due"),
     (r"\b(my )?grades?\b.*\b(canvas|classes|now|right now)?\b|\bwhat'?s my grade\b", "grades"),
@@ -338,6 +479,18 @@ def skill(text: str) -> str | None:
             continue
         g = next((x for x in m.groups() if x), "") if m.groups() else ""
         try:
+            if kind == "help":
+                return HELP
+            if kind == "remind":
+                if re.search(r"\b(focus|study|pomodoro)\b", t, re.I):
+                    continue  # the study timer has its own handler
+                return remind(t)
+            if kind == "list_reminders":
+                return list_reminders()
+            if kind == "close":
+                if re.search(r"\b(the )?(game|blackjack|timer|session)\b", g, re.I):
+                    return None
+                return close_thing(g)
             if kind.startswith("music"):
                 cmd = {"music_play": "play", "music_pause": "pause", "music_next": "next", "music_prev": "previous",
                        "music_now": "now", "music_query": "play"}[kind]

@@ -228,6 +228,13 @@ def respond_stream(text: str, history: list[dict] | None = None):
         ctx = mac.plan_context(text)
     except Exception:  # noqa: BLE001
         ctx = ""
+    try:
+        from . import github
+        proj = github.repo_context(text)
+        if proj:
+            msgs[0]["content"] += ("\nAbout the project being asked about (use only this, don't add to it):\n" + proj)
+    except Exception:  # noqa: BLE001
+        pass
     if ctx:
         msgs[0]["content"] += ("\nHere is what " + brain.OWNER + " actually has coming up. Base your advice on it, "
                                "picking the single most urgent thing first:\n" + ctx)

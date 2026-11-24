@@ -17,9 +17,8 @@ from . import settings as S
 
 DEEP = re.compile(
     r"\b(research|look (it |this |that )?up|search (the web|online|for)|find (me )?(papers?|articles?|sources?|studies)"
-    r"|deep dive|dig into|compare\b|summari[sz]e (my |the )?(emails?|inbox|calendar|news|paper|article)"
-    r"|(my|the) (inbox|emails?|calendar|schedule)\b|what'?s on my calendar|plan (my|out|a)\b"
-    r"|draft (an?|the) (email|message)|write (me )?(a |an )?(plan|outline|summary)"
+    r"|deep dive|dig into|compare\b|summari[sz]e (the )?(news|paper|article)"
+    r"|plan (out|a)\b|write (me )?(a |an )?(plan|outline|summary)"
     r"|latest (news|research|papers?)|step by step|in depth)", re.I)
 
 

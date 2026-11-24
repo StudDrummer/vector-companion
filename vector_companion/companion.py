@@ -1361,6 +1361,93 @@ def _load(p, default):
 WEEKDAYS = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
 
 
+REMINDERS_FILE = S.DATA_DIR / "reminders.json"
+
+
+class Reminders:
+    """Spoken reminders and timers ('remind me to email Mr. K in 20 minutes', 'set a timer for 10 minutes').
+    Saved to disk so a restart doesn't lose them. Also gives a heads-up in the evening about Canvas work due
+    tomorrow (once a day, off in quiet hours)."""
+
+    def __init__(self, comp: "Companion"):
+        self.c = comp
+        self.items = _load(REMINDERS_FILE, [])
+        self.lock = threading.Lock()
+        self.nudged_on = None
+        threading.Thread(target=self._loop, daemon=True).start()
+
+    def _save(self):
+        try:
+            REMINDERS_FILE.write_text(json.dumps(self.items))
+        except OSError:
+            pass
+
+    def add(self, text: str, at: float) -> dict:
+        r = {"id": int(time.time() * 1000), "text": text.strip()[:200], "at": float(at)}
+        with self.lock:
+            self.items = sorted(self.items + [r], key=lambda x: x["at"])
+            self._save()
+        log(f"reminder set for {datetime.fromtimestamp(at):%a %-I:%M %p}: {r['text']}")
+        return r
+
+    def clear(self):
+        with self.lock:
+            self.items = []
+            self._save()
+
+    def _loop(self):
+        while True:
+            time.sleep(5)
+            now = time.time()
+            with self.lock:
+                due = [r for r in self.items if r["at"] <= now]
+                if due:
+                    self.items = [r for r in self.items if r["at"] > now]
+                    self._save()
+            for r in due:
+                self._fire(r)
+            try:
+                self._evening_heads_up()
+            except Exception as e:  # noqa: BLE001
+                log(f"heads-up skipped: {e}")
+
+    def _fire(self, r: dict):
+        jarvis = S.load().get("persona", {}).get("style") == "jarvis"
+        text = r["text"]
+        msg = (f"{text}, sir." if text.lower().startswith("timer") else f"Reminder{', sir' if jarvis else ''}: {text}.")
+        mac_notify("Jarvis" if jarvis else "Vector", msg)
+        late = time.time() - r["at"] > 600  # Mac was asleep: say it happened, don't pretend it's on time
+        try:
+            self.c.announce(("Earlier: " if late else "") + msg, "check")
+        except Exception:  # noqa: BLE001
+            _quiet(self.c.say, msg)
+
+    def _evening_heads_up(self):
+        c = prefs()
+        if not c.get("due_heads_up", True) or S.in_quiet_hours():
+            return
+        now = datetime.now()
+        at = str(c.get("due_heads_up_at", "19:30"))
+        hh, mm = (int(x) for x in at.split(":"))
+        if self.nudged_on == now.date() or (now.hour, now.minute) < (hh, mm) or now.hour >= 22:
+            return
+        self.nudged_on = now.date()
+        from . import canvas
+        if not canvas.connected():
+            return
+        tomorrow = now.date() + timedelta(days=1)
+        items = [i for i in canvas.upcoming(2) if not i["done"] and i["due"].date() == tomorrow]
+        if not items:
+            return
+        jarvis = S.load().get("persona", {}).get("style") == "jarvis"
+        names = "; ".join(i["title"] for i in items[:3])
+        msg = (f"A heads-up{', sir' if jarvis else ''}: due tomorrow on Canvas, {names}."
+               + (f" Plus {len(items) - 3} more." if len(items) > 3 else ""))
+        log("evening Canvas heads-up")
+        mac_notify("Due tomorrow", names)
+        _quiet(self.c.say, msg)
+
+
 def upcoming_reminders(days: int = 3) -> list[str]:
     """Memory notes that mention today, tomorrow, or a weekday/date in the next few days."""
     out = []
@@ -1420,6 +1507,8 @@ class Handler(BaseHTTPRequestHandler):
                                         "prefs": prefs(), "safety": safety(), "guard": bool(COMP.guard),
                                         "speaking": time.time() < COMP.speaking_until, "voice": COMP.voice_engine(),
                                         "cube": COMP.cube_connected})
+            if u.path == "/reminders":
+                return self._send(200, {"reminders": COMP.reminders.items})
             if u.path == "/stats":
                 return self._send(200, COMP.stats_summary())
             if u.path == "/guard":
@@ -1429,10 +1518,13 @@ class Handler(BaseHTTPRequestHandler):
             if u.path == "/sensors":
                 return self._send(200, COMP.sensors())
             if u.path == "/map.png":
-                try:
-                    png = COMP.call(COMP.map_png, 4, "map")
-                except Exception:  # noqa: BLE001  (no map until he drives around)
-                    png = _no_map_png()
+                png = None
+                if time.time() - getattr(COMP, "map_failed_at", 0) > 120:  # don't ask him every 3 s when there's no map
+                    try:
+                        png = COMP.call(COMP.map_png, 4, "map")
+                    except Exception:  # noqa: BLE001  (no map until he drives around)
+                        COMP.map_failed_at = time.time()
+                png = png or _no_map_png()
                 return self._send(200, png, "image/png")
             if u.path == "/capture":
                 return self._send(200, COMP.capture(), "image/jpeg")
@@ -1521,6 +1613,11 @@ class Handler(BaseHTTPRequestHandler):
                     COMP.stop_mirror()
             elif u.path == "/still":
                 COMP.pause_still(float(b.get("pause", 45)))
+            elif u.path == "/remind":
+                if b.get("clear"):
+                    COMP.reminders.clear()
+                    return self._send(200, {"ok": True})
+                return self._send(200, {"ok": True, **COMP.reminders.add(str(b.get("text", "")), float(b["at"]))})
             elif u.path == "/relaunch_app":
                 pid, app = int(b.get("pid", 0)), str(b.get("app", "/Applications/Vector.app"))
                 if not app.endswith(".app"):
@@ -1631,6 +1728,7 @@ def main():
     global COMP
     log("companion starting")
     COMP = Companion()
+    COMP.reminders = Reminders(COMP)
     _quiet_sdk_logs()
     threading.Timer(20, _quiet_sdk_logs).start()  # again once the SDK has connected and added its loggers
     COMP.resume_focus()

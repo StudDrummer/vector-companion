@@ -38,7 +38,7 @@ DEFAULTS: dict = {
     "companion": {"pet_hearts": True, "greetings": True, "morning_briefing": True,
                   "face_icons": True, "focus_minutes": 25, "focus_checkins": True,
                   "cube_button": True, "stretch_reminders": True, "stretch_minutes": 50,
-                  "bedtime_nudge": True, "dock_head_angle": 25},
+                  "bedtime_nudge": True, "due_heads_up": True, "due_heads_up_at": "19:30", "dock_head_angle": 25},
     # how he sounds: his own robot voice, or a Mac voice played through his speaker
     "voice": {"engine": "auto", "mac_voice": "Daniel", "rate": 190, "volume": 80, "piper_voice": "en_GB-alan-medium",
               "speed": 1.0, "fx": True, "output": "mac", "mac_volume": 1.0},

@@ -203,6 +203,7 @@
         <div class="row"><div class="rl">Stretch reminders<small>When he's seen you at your desk this long without a break</small></div><div class="rr"><label class="sw"><input type="checkbox" data-c="stretch_reminders"><span></span></label></div></div>
         <div class="row"><div class="rl">Remind after</div><div class="rr"><div class="stepper" data-c="stretch_minutes" data-step="10" data-min="20" data-unit=" min"></div></div></div>
         <div class="row"><div class="rl">Late-night nudge<small>Once a night after 11 PM if you're still at your desk</small></div><div class="rr"><label class="sw"><input type="checkbox" data-c="bedtime_nudge"><span></span></label></div></div>
+        <div class="row"><div class="rl">Evening heads-up<small>At 7:30 PM, Jarvis tells you what's due tomorrow on Canvas (once a day)</small></div><div class="rr"><label class="sw"><input type="checkbox" data-c="due_heads_up"><span></span></label></div></div>
         <div class="row"><div class="rl" id="focus-state">No timer running</div><div class="rr"><button class="btn primary small" id="focus-go">Start</button><button class="btn small" id="focus-stop">Stop</button></div></div>
       </div>
       <div class="group-title">Try it</div>
@@ -248,7 +249,8 @@
       </div>
       <div class="group-title">Things to say</div>
       <div class="group tips">
-        <div class="row"><div class="rl">"open Canvas" · "open Instagram" · "open Notes" · "search YouTube for mitosis"</div></div>
+        <div class="row"><div class="rl">"open Canvas" · "open Instagram" · "open NeuroVision" · "search YouTube for mitosis" · "play music" · "next song"</div></div>
+        <div class="row"><div class="rl">"remind me to email Mr. K in 20 minutes" · "set a timer for 10 minutes" · "close Instagram"</div></div>
         <div class="row"><div class="rl">"check my calendar" · "what's due tomorrow" · "what are my grades" · "what should I do next"</div></div>
         <div class="row"><div class="rl">"take a note: bio test moved to Friday" · "read my note about chem"</div></div>
         <div class="row"><div class="rl">"ask Claude what to do next" · "ask Claude how to balance a redox equation"</div></div>
@@ -337,8 +339,8 @@
       <h2 class="ptitle">Brain &amp; Memory</h2>
       <div class="group-title">Deep brain (OpenJarvis)</div>
       <div class="group">
-        <div class="row"><div class="rl">OpenJarvis agent<small id="oj-sub">Research, email, calendar and multi-step requests go to Stanford's OpenJarvis agent running on this Mac. Everyday questions stay on the fast path.</small></div><div class="rr" id="oj-state">--</div></div>
-        <div class="row"><div class="rl">Use it for big requests<small>"Jarvis, research...", "what's on my calendar", "summarize my inbox", "plan my week"</small></div><div class="rr"><label class="sw"><input type="checkbox" data-k="openjarvis.enabled"><span></span></label></div></div>
+        <div class="row"><div class="rl">OpenJarvis agent<small id="oj-sub">Research, comparisons and multi-step requests go to Stanford's OpenJarvis agent on this Mac, which searches the web before answering. Everyday questions stay on the fast path.</small></div><div class="rr" id="oj-state">--</div></div>
+        <div class="row"><div class="rl">Use it for big requests<small>"Jarvis, research...", "compare...", "look up...", "the latest research on..."</small></div><div class="rr"><label class="sw"><input type="checkbox" data-k="openjarvis.enabled"><span></span></label></div></div>
       </div>
       <div class="group-title">Connections</div>
       <div class="group">

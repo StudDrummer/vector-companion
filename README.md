@@ -250,7 +250,7 @@ wire-pod and WirePod by kercre123 (MIT). Vector SDK originally by Anki, maintain
 ## Deep brain: OpenJarvis (Stanford)
 
 Everyday questions stay on the fast voice path. Requests that need real work ("Jarvis, research...",
-"what's on my calendar", "summarize my inbox", "plan my week", "compare...") go to
+"look up...", "compare...", "the latest research on...") go to
 [OpenJarvis](https://github.com/open-jarvis/OpenJarvis), Stanford's local-first agent framework,
 running on this Mac. Jarvis says "On it, sir.", speaks a short summary when it's done, and saves the
 full write-up under Brain & Memory > Reports.
@@ -267,3 +267,24 @@ teaches them how to use him.
 Ears uses Pipecat's open Smart Turn v3 model (8 MB, ~35 ms per check) to hear when you've finished
 a sentence from your intonation, so he answers after ~0.25 s of quiet when you're done and waits
 when you're only pausing.
+
+
+## Jarvis on the Mac
+
+Say his name and what you want, in one breath:
+
+| Say | What happens |
+|---|---|
+| "open Canvas / Instagram / Notes / NeuroVision" | Opens the app, site, or your project on GitHub (unknown names try name.com) |
+| "close Instagram" | Closes those browser tabs, or quits the app |
+| "check my calendar", "what's on my calendar tomorrow" | Reads the Mac Calendar app (every account added in System Settings) |
+| "what's due tomorrow", "what are my grades" | Canvas (token or calendar feed on Brain & Memory > Connections) |
+| "remind me to email Mr. K in 20 minutes", "set a timer for 10 minutes" | Spoken reminder + Mac notification; survives restarts |
+| "take a note: ...", "read my note about chem" | Apple Notes |
+| "play music", "pause", "next song", "what song is this" | Spotify desktop app (or Apple Music) |
+| "what did I push today", "check GitHub", "my pull requests" | GitHub (token on Connections, or `gh auth login`) |
+| "ask Claude what to do next" | Opens Claude with the question and what's due / on your calendar |
+| "what should I do next" | Jarvis plans from your real Canvas, calendar and GitHub |
+| "what can you do" | The short list |
+
+At 7:30 PM he gives a one-line heads-up about Canvas work due tomorrow (Personality page to turn off).

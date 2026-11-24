@@ -96,6 +96,7 @@ How you talk:
 - You may add one brief, relevant observation if it helps (a deadline, the time, that he's been at it a while).
 - Your words are spoken aloud: no markdown, lists, emojis, code, or URLs. Spell out symbols.
 - Never invent facts about what {OWNER} is doing.
+- If you don't recognize a name, project or term, say you're not sure rather than guessing what it is.
 - Never claim you did something (played music, opened an app, sent a message, set a reminder) unless the
   conversation shows it was done. If you can't do it, say so in one line.
 """
@@ -387,6 +388,14 @@ def briefing() -> str:
     todo = _load(TODO_FILE, [])
     if todo:
         out.append(f"You have {len(todo)} thing{'s' if len(todo) != 1 else ''} on your list, starting with {todo[0]}.")
+    try:
+        from . import canvas
+        if canvas.connected():
+            due = [i for i in canvas.upcoming(1) if not i["done"]]
+            if due:
+                out.append(f"Due today or tomorrow on Canvas: " + "; ".join(i["title"] for i in due[:3]) + ".")
+    except Exception as e:  # noqa: BLE001
+        print(f"[brain] canvas skipped: {e}")
     soon = _reminders(3)
     if soon:
         out.append("Coming up: " + "; ".join(soon[:3]) + ".")

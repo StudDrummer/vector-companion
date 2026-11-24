@@ -74,7 +74,7 @@ def repos() -> list[dict]:
     if connected():
         try:
             for r in _cached("repos", 600, lambda: _get("/user/repos?sort=pushed&per_page=50&affiliation=owner,collaborator")):
-                out[r["name"].lower()] = {"name": r["name"], "url": r["html_url"]}
+                out[r["name"].lower()] = {"name": r["name"], "url": r["html_url"], "desc": r.get("description") or ""}
         except Exception:  # noqa: BLE001
             pass
     for d in (Path.home() / "GitHub", Path(os.path.expanduser(os.environ.get("PROJECTS_DIR", "") or "~/GitHub"))):
@@ -198,6 +198,37 @@ def prs_sentence(kind: str = "pr") -> str:
     names = [f"{i['title'][:60]} in {i['repository_url'].split('/')[-1]}" for i in items[:3]]
     n = res.get("total_count", len(items))
     return f"{n} open {label if n != 1 else label[:-1]}: " + "; ".join(names) + "."
+
+
+def repo_context(text: str) -> str:
+    """When you mention one of your own projects ('what's VIGIL?'), what it actually is: its GitHub
+    description and the start of its README, so Jarvis doesn't make something up."""
+    words = set(re.findall(r"[a-z0-9]+", (text or "").lower()))
+    joined = re.sub(r"[^a-z0-9]", "", (text or "").lower())
+    hits = []
+    for r in repos():
+        key = re.sub(r"[^a-z0-9]", "", r["name"].lower())
+        if len(key) >= 4 and (key in words or (len(key) >= 6 and key in joined)):
+            hits.append(r)
+    out = []
+    for r in hits[:2]:
+        readme = ""
+        local = Path.home() / "GitHub" / r["name"]
+        for f in ("README.md", "readme.md", "README"):
+            if (local / f).exists():
+                readme = (local / f).read_text(errors="ignore")
+                break
+        if not readme and connected():
+            try:
+                import base64
+                owner_repo = r["url"].split("github.com/")[-1]
+                readme = base64.b64decode(_get(f"/repos/{owner_repo}/readme")["content"]).decode("utf-8", "ignore")
+            except Exception:  # noqa: BLE001
+                readme = ""
+        readme = re.sub(r"<[^>]+>|!\[[^\]]*\]\([^)]*\)|\[!\[.*?\)\]\(.*?\)", "", readme)
+        readme = re.sub(r"\n{2,}", "\n", readme).strip()[:900]
+        out.append(f"{r['name']} is one of {login()}'s own projects. {r.get('desc') or ''}\n{readme}".strip())
+    return "\n\n".join(out)
 
 
 def context() -> str:

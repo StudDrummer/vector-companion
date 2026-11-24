@@ -70,6 +70,16 @@ def log(msg: str) -> None:
     S.log("ears", msg)
 
 
+def dedupe(text: str) -> str:
+    """Whisper sometimes writes the same sentence twice ('Explain X to me. Explain X to me.')."""
+    parts = re.split(r"(?<=[.!?])\s+", text.strip())
+    out = []
+    for p in parts:
+        if not out or p.lower().strip(" .!?") != out[-1].lower().strip(" .!?"):
+            out.append(p)
+    return " ".join(out)
+
+
 def strip_name(text: str) -> str:
     """'Hey Jarvis, what's the time?' / 'What's the time, Jarvis?' -> "What's the time?" """
     text = re.sub(r"^\W*((hey|ok|okay|hi|yo)[,.]?\s+)?" + NAME.pattern[2:-2].join(["(", ")"]) + r"\b[,.!?]?\s*", "", text, flags=re.I)
@@ -267,6 +277,29 @@ class Ears:
             if (quiet and self.finished(frames, quiet)) or len(frames) * FRAME / SR > 15:
                 return frames
 
+    _vocab = (0.0, "")
+
+    def vocab(self) -> str:
+        """Words Whisper should expect (it guesses unusual names much better when primed): your projects,
+        classes and the apps you ask for."""
+        if time.time() - self._vocab[0] < 3600:
+            return self._vocab[1]
+        words = ["Jarvis", "Vector", "Canvas", "GitHub", "Spotify", "Instagram", "Claude", "Overlake", "NeuroVision",
+                 "VIGIL", "retinal", "OCT", "Alzheimer's", "AP Bio", "AP Lang", "Honors Physics", "blackjack",
+                 "study session"]
+        try:
+            from . import github
+            words += [r["name"] for r in github.repos()[:12]]
+        except Exception:  # noqa: BLE001
+            pass
+        seen, out = set(), []
+        for w in words:
+            if w.lower() not in seen:
+                seen.add(w.lower())
+                out.append(w)
+        self._vocab = (time.time(), ", ".join(out)[:400] + ".")
+        return self._vocab[1]
+
     def finished(self, frames, quiet: int) -> bool:
         """Has the speaker finished? quiet = trailing 80 ms frames of silence."""
         if self.turn is None:
@@ -285,8 +318,9 @@ class Ears:
         audio = np.concatenate(frames).astype(np.float32) / 32768.0
         segs, _ = self._stt().transcribe(audio, language="en", beam_size=1, vad_filter=False,
                                          condition_on_previous_text=False, without_timestamps=True,
-                                         initial_prompt="Jarvis, Vector, homework, study session, blackjack, AP Bio.")
+                                         initial_prompt=self.vocab())
         text = " ".join(s.text for s in segs).strip()
+        text = dedupe(text)
         if raw:
             return text
         text = strip_name(text)
@@ -316,6 +350,7 @@ class Ears:
 
     def cue(self):
         if self.prefs()["ears"].get("chime", True):
+            self.mark_busy(0.45)  # the chime itself must not count as you starting to talk
             subprocess.Popen(["afplay", "/System/Library/Sounds/Tink.aiff"], stdout=subprocess.DEVNULL,
                              stderr=subprocess.DEVNULL)
         if self.robot:

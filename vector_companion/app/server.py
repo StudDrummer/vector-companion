@@ -331,6 +331,17 @@ def today() -> dict:
         out["focus"] = cc.call("/health", timeout=2).get("focus")
     except Exception:  # noqa: BLE001
         pass
+    try:
+        out["reminders"] = cc.call("/reminders", timeout=2).get("reminders", [])[:3]
+    except Exception:  # noqa: BLE001
+        out["reminders"] = []
+    try:
+        from .. import canvas
+        if canvas.connected():
+            out["due"] = [{"title": i["title"], "course": canvas._short_course(i["course"]), "when": canvas._day(i["due"])}
+                          for i in canvas.upcoming(3) if not i["done"]][:5]
+    except Exception:  # noqa: BLE001
+        out["due"] = []
     if S.load()["weather"].get("enabled", True):
         hit = _weather_cache.get("w")
         if hit and time.time() - hit[0] < 1200:

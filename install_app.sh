@@ -34,22 +34,84 @@ cat > "$APP/Contents/Info.plist" <<EOF
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleExecutable</key><string>Vector</string>
   <key>NSAppleEventsUsageDescription</key><string>Jarvis reads your Calendar and Notes when you ask him to.</string>
+  <key>LSUIElement</key><true/>
   <key>CFBundleIconFile</key><string>AppIcon</string>
   <key>LSMinimumSystemVersion</key><string>11.0</string>
   <key>NSHighResolutionCapable</key><true/>
   <key>LSApplicationCategoryType</key><string>public.app-category.utilities</string>
 </dict></plist>
 EOF
-cat > "$APP/Contents/MacOS/Vector" <<EOF
+mkdir -p "$ROOT/logs"
+LTMP="$(mktemp -d)"
+cat > "$LTMP/main.swift" <<EOF
+// Vector.app launcher: starts the app with the right Python, logs every launch, and shows an alert
+// with the error if it fails to start (instead of quietly doing nothing).
+import AppKit
+import Foundation
+
+let root = "$ROOT"
+let py = "$PY"
+let logPath = root + "/logs/app.log"
+if !FileManager.default.fileExists(atPath: logPath) { FileManager.default.createFile(atPath: logPath, contents: nil) }
+let log = FileHandle(forWritingAtPath: logPath)
+log?.seekToEndOfFile()
+log?.write("\n=== Vector launched \(Date()) ===\n".data(using: .utf8)!)
+
+let p = Process()
+var args = ["-m", "vector_companion.app"]
+if FileManager.default.fileExists(atPath: "/usr/bin/arch") {
+    var isArm = 0; var size = MemoryLayout<Int>.size
+    if sysctlbyname("hw.optional.arm64", &isArm, &size, nil, 0) == 0 && isArm == 1 {
+        p.executableURL = URL(fileURLWithPath: "/usr/bin/arch")
+        args = ["-arm64", py] + args
+    }
+}
+if p.executableURL == nil { p.executableURL = URL(fileURLWithPath: py) }
+p.arguments = args
+p.currentDirectoryURL = URL(fileURLWithPath: root)
+var env = ProcessInfo.processInfo.environment
+env["PATH"] = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:" + (env["PATH"] ?? "")
+p.environment = env
+if let log = log { p.standardOutput = log; p.standardError = log }
+
+func fail(_ msg: String) -> Never {
+    let app = NSApplication.shared
+    app.setActivationPolicy(.regular)
+    app.activate(ignoringOtherApps: true)
+    let a = NSAlert()
+    a.messageText = "Vector couldn't start"
+    a.informativeText = msg
+    a.runModal()
+    exit(1)
+}
+
+do { try p.run() } catch { fail("Couldn't run Python at \(py): \(error.localizedDescription)") }
+let started = Date()
+p.waitUntilExit()
+if p.terminationStatus != 0 && Date().timeIntervalSince(started) < 20 {
+    let text = (try? String(contentsOfFile: logPath, encoding: .utf8)) ?? ""
+    let tail = text.split(separator: "\n").suffix(8).joined(separator: "\n")
+    fail("It stopped right away (code \(p.terminationStatus)). Last lines of logs/app.log:\n\n" + tail)
+}
+exit(p.terminationStatus)
+EOF
+if xcrun swiftc -O -o "$APP/Contents/MacOS/Vector" "$LTMP/main.swift" >/dev/null 2>"$LTMP/err"; then
+  echo "   built the native app launcher"
+else
+  echo "   (couldn't compile the native launcher, using a script)"; sed 's/^/     /' "$LTMP/err" | head -3
+  cat > "$APP/Contents/MacOS/Vector" <<EOF
 #!/bin/bash
 cd "$ROOT"
+echo "=== Vector launched \$(date) ===" >> "$ROOT/logs/app.log"
 if [ "\$(sysctl -n hw.optional.arm64 2>/dev/null)" = "1" ]; then
   exec /usr/bin/arch -arm64 "$PY" -m vector_companion.app >> "$ROOT/logs/app.log" 2>&1
 fi
 exec "$PY" -m vector_companion.app >> "$ROOT/logs/app.log" 2>&1
 EOF
+fi
+rm -rf "$LTMP"
 chmod +x "$APP/Contents/MacOS/Vector"
-mkdir -p "$ROOT/logs"
+codesign --force --sign - "$APP" >/dev/null 2>&1 || true
 
 echo "==> Creating /Applications/Vector Ears.app (the 'Hey Jarvis' listener, runs in the background)"
 EARS="/Applications/Vector Ears.app"

@@ -33,6 +33,19 @@ SITES = {
     "pubmed": "https://pubmed.ncbi.nlm.nih.gov", "google scholar": "https://scholar.google.com",
     "scholar": "https://scholar.google.com", "linkedin": "https://www.linkedin.com", "reddit": "https://www.reddit.com",
     "x": "https://x.com", "twitter": "https://x.com", "whatsapp": "https://web.whatsapp.com",
+    "amazon": "https://www.amazon.com", "ebay": "https://www.ebay.com", "target": "https://www.target.com",
+    "costco": "https://www.costco.com", "best buy": "https://www.bestbuy.com", "walmart": "https://www.walmart.com",
+    "google": "https://www.google.com", "google maps": "https://maps.google.com", "google calendar": "https://calendar.google.com",
+    "wikipedia": "https://www.wikipedia.org", "quizlet": "https://quizlet.com", "desmos": "https://www.desmos.com/calculator",
+    "wolfram alpha": "https://www.wolframalpha.com", "wolfram": "https://www.wolframalpha.com", "duolingo": "https://www.duolingo.com",
+    "discord": "https://discord.com/app", "tiktok": "https://www.tiktok.com", "snapchat": "https://web.snapchat.com",
+    "facebook": "https://www.facebook.com", "pinterest": "https://www.pinterest.com", "twitch": "https://www.twitch.tv",
+    "hulu": "https://www.hulu.com", "disney plus": "https://www.disneyplus.com", "prime video": "https://www.primevideo.com",
+    "apple music": "https://music.apple.com", "soundcloud": "https://soundcloud.com", "weather": "https://weather.com",
+    "kaggle": "https://www.kaggle.com", "hugging face": "https://huggingface.co", "arxiv": "https://arxiv.org",
+    "common app": "https://apply.commonapp.org", "stanford": "https://www.stanford.edu", "overlake": "https://www.overlake.org",
+    "notion": "https://www.notion.so", "canva": "https://www.canva.com", "figma": "https://www.figma.com",
+    "zoom": "https://zoom.us", "uber": "https://m.uber.com", "doordash": "https://www.doordash.com",
 }
 # spoken name -> app name, when they differ
 APP_ALIASES = {"notes": "Notes", "calendar": "Calendar", "messages": "Messages", "imessage": "Messages",
@@ -96,9 +109,21 @@ def open_thing(name: str) -> str:
     if close:
         subprocess.Popen(["open", apps[close[0]]])
         return f"Opening {os.path.basename(apps[close[0]])[:-4]}{sir}."
-    if re.match(r"^[\w-]+\.(com|org|net|edu|io|ai|gov)$", n):
+    if re.match(r"^[\w-]+\.(com|org|net|edu|io|ai|gov|co|tv|us)$", n):
         subprocess.Popen(["open", "https://" + n])
         return f"Opening {n}{sir}."
+    # not an app or a known site: try <name>.com (amazon -> amazon.com) if that domain exists
+    slug = re.sub(r"[^a-z0-9]", "", n)
+    if 2 < len(slug) < 30:
+        import socket
+        socket.setdefaulttimeout(2)
+        for dom in (f"www.{slug}.com", f"{slug}.com"):
+            try:
+                socket.gethostbyname(dom)
+                subprocess.Popen(["open", "https://" + dom])
+                return f"Opening {name.strip().title()}{sir}."
+            except OSError:
+                continue
     return f"I don't see an app or site called {name.strip()}{sir}."
 
 
@@ -238,8 +263,56 @@ def ask_claude(question: str) -> str:
     return f"I've put that to Claude{_style_sir()}. It's on your screen."
 
 
+# ------------------------------------------------------------------ music (Spotify app, or Apple Music)
+def _player() -> str:
+    apps = _apps()
+    return "Spotify" if "spotify" in apps else "Music"
+
+
+def music(cmd: str, query: str = "") -> str:
+    app, sir = _player(), _style_sir()
+    if cmd == "play":
+        if query:
+            if app == "Spotify":
+                subprocess.Popen(["open", "spotify:search:" + urllib.parse.quote(query)])
+                return f"I've pulled up {query} in Spotify{sir}. Press play on the one you want."
+            _osascript(f'tell application "Music" to play (first track of library playlist 1 whose name contains {_q(query)} or artist contains {_q(query)})')
+            return f"Playing {query}{sir}."
+        _osascript(f'tell application "{app}" to play')
+        return now_playing(prefix="Playing")
+    if cmd == "pause":
+        _osascript(f'tell application "{app}" to pause')
+        return f"Paused{sir}."
+    if cmd == "next":
+        _osascript(f'tell application "{app}" to next track')
+        return now_playing(prefix="Now playing")
+    if cmd == "previous":
+        _osascript(f'tell application "{app}" to previous track')
+        return now_playing(prefix="Now playing")
+    return now_playing()
+
+
+def now_playing(prefix: str = "This is") -> str:
+    import time as _t
+    _t.sleep(0.6)
+    app = _player()
+    try:
+        out = _osascript(f'tell application "{app}" to if player state is playing then return (name of current track) & " by " & (artist of current track)')
+    except Exception:  # noqa: BLE001
+        out = ""
+    if not out:
+        return f"Nothing is playing in {app} yet{_style_sir()}. Open it and pick something, and I can handle it from there."
+    return f"{prefix} {out}{_style_sir()}."
+
+
 # ------------------------------------------------------------------ router
 PATTERNS = [
+    (r"^(?:play|resume|start|put on)(?: some| my)? (?:music|songs?|spotify|tunes)$|^(?:resume|unpause)(?: the)?(?: music| song| spotify)?$", "music_play"),
+    (r"^(?:pause|stop)(?: the| my)? (?:music|song|spotify|track)$|^pause$", "music_pause"),
+    (r"^(?:next|skip)(?: this)?(?: song| track)?$|^skip it$", "music_next"),
+    (r"^(?:previous|last|go back)(?: a)? (?:song|track)$", "music_prev"),
+    (r"^what(?:'s| is) (?:this song|playing|this track)$|^what song is (?:this|playing)$", "music_now"),
+    (r"^(?:play|put on) (.+?)(?: on spotify| on apple music)?$", "music_query"),
     (r"^(?:can you |please )?(?:ask|tell) claude (?:to |about )?(.+)$", "claude"),
     (r"^(?:can you |please )?(?:search|look up) (youtube|google scholar|scholar|pubmed|google) for (.+)$", "search"),
     (r"^(?:can you |please )?google (.+)$", "google"),
@@ -265,6 +338,10 @@ def skill(text: str) -> str | None:
             continue
         g = next((x for x in m.groups() if x), "") if m.groups() else ""
         try:
+            if kind.startswith("music"):
+                cmd = {"music_play": "play", "music_pause": "pause", "music_next": "next", "music_prev": "previous",
+                       "music_now": "now", "music_query": "play"}[kind]
+                return music(cmd, g if kind == "music_query" else "")
             if kind == "claude":
                 if re.fullmatch(r"(what )?(should i |i should )?(to )?do next|next|what'?s next", g.strip(), re.I):
                     g = "what should I do next"

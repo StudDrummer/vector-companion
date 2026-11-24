@@ -148,8 +148,11 @@ def _relaunch():
     the window down with it, so ask macOS to start a fresh copy a moment after this one exits.)"""
     app = "/Applications/Vector.app"
     if sys.platform == "darwin" and os.path.exists(app):
-        subprocess.Popen(["/bin/sh", "-c", f'sleep 1.5; open "{app}"'], start_new_session=True,
-                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        # wait until this process has fully gone, then reopen (launchd keeps the helper alive after we exit)
+        script = f'while kill -0 {os.getpid()} 2>/dev/null; do sleep 0.2; done; sleep 0.5; open "{app}"'
+        subprocess.Popen(["/usr/bin/nohup", "/bin/sh", "-c", script], start_new_session=True,
+                         stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, close_fds=True)
+        time.sleep(0.3)
         os._exit(0)
     os.execv(sys.executable, [sys.executable, "-m", "vector_companion.app"])
 

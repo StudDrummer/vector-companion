@@ -144,14 +144,16 @@ def _ping(url: str) -> bool:
 
 
 def _relaunch():
-    """Quit and reopen the app with the latest code. (exec'ing in place from a background thread can take
-    the window down with it, so ask macOS to start a fresh copy a moment after this one exits.)"""
+    """Quit and reopen the app with the latest code. The reopen is done by the companion service, which
+    lives outside this app's process tree (macOS cleans up an app's helpers when it quits)."""
     app = "/Applications/Vector.app"
     if sys.platform == "darwin" and os.path.exists(app):
-        # wait until this process has fully gone, then reopen (launchd keeps the helper alive after we exit)
-        script = f'while kill -0 {os.getpid()} 2>/dev/null; do sleep 0.2; done; sleep 0.5; open "{app}"'
-        subprocess.Popen(["/usr/bin/nohup", "/bin/sh", "-c", script], start_new_session=True,
-                         stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, close_fds=True)
+        try:
+            cc.call("/relaunch_app", {"pid": os.getpid(), "app": app}, timeout=3)
+        except Exception:  # noqa: BLE001  (companion down: best effort from here)
+            script = f'while kill -0 {os.getpid()} 2>/dev/null; do sleep 0.2; done; sleep 0.5; open "{app}"'
+            subprocess.Popen(["/usr/bin/nohup", "/bin/sh", "-c", script], start_new_session=True,
+                             stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         time.sleep(0.3)
         os._exit(0)
     os.execv(sys.executable, [sys.executable, "-m", "vector_companion.app"])

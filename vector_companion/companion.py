@@ -1521,6 +1521,21 @@ class Handler(BaseHTTPRequestHandler):
                     COMP.stop_mirror()
             elif u.path == "/still":
                 COMP.pause_still(float(b.get("pause", 45)))
+            elif u.path == "/relaunch_app":
+                pid, app = int(b.get("pid", 0)), str(b.get("app", "/Applications/Vector.app"))
+                if not app.endswith(".app"):
+                    return self._send(400, {"error": "bad app"})
+
+                def relaunch():
+                    for _ in range(100):  # up to 20 s for the old window to close
+                        try:
+                            os.kill(pid, 0)
+                        except OSError:
+                            break
+                        time.sleep(0.2)
+                    time.sleep(0.5)
+                    subprocess.run(["open", app], capture_output=True, timeout=20)
+                threading.Thread(target=relaunch, daemon=True).start()
             elif u.path == "/reconnect":
                 COMP.mark_dead("manual reconnect")
             else:

@@ -336,7 +336,6 @@ async function loadSafety() {
   document.querySelector(".joy-wrap").classList.toggle("locked", DOCK);
 }
 async function setDock(on) {
-  if (!on && !confirm("Turn off the dock lock? With his current battery he'll shut down as soon as he leaves the charger.")) { loadSafety(); return; }
   await tryApi("/api/settings", { app: { safety: { dock_lock: on } } }, on ? "Dock lock on" : "Dock lock off: driving enabled");
   loadSafety();
 }

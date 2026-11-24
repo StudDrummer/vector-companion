@@ -159,6 +159,14 @@ def _relaunch():
     os.execv(sys.executable, [sys.executable, "-m", "vector_companion.app"])
 
 
+def _gh_login() -> str:
+    try:
+        from .. import github
+        return github.login() if github.connected() else ""
+    except Exception:  # noqa: BLE001
+        return ""
+
+
 def status() -> dict:
     try:
         comp = cc.call("/health", timeout=1.5)
@@ -518,7 +526,8 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/connections":
                 env = S.read_env()
                 return self._json({"canvas_url": env.get("CANVAS_URL", "https://overlake.instructure.com"),
-                                   "has_token": bool(env.get("CANVAS_TOKEN")), "has_feed": bool(env.get("CANVAS_ICS"))})
+                                   "has_token": bool(env.get("CANVAS_TOKEN")), "has_feed": bool(env.get("CANVAS_ICS")),
+                                   "github": _gh_login()})
             if path == "/api/reports":
                 from .. import openjarvis as OJ
                 out = []
@@ -617,7 +626,7 @@ class Handler(BaseHTTPRequestHandler):
                 url_ = str(b.get("canvas_url", "")).strip().rstrip("/")
                 if url_:
                     up["CANVAS_URL"] = url_ if url_.startswith("http") else "https://" + url_
-                for k, env_k in (("canvas_token", "CANVAS_TOKEN"), ("canvas_ics", "CANVAS_ICS")):
+                for k, env_k in (("canvas_token", "CANVAS_TOKEN"), ("canvas_ics", "CANVAS_ICS"), ("github_token", "GITHUB_TOKEN")):
                     v = str(b.get(k, "")).strip()
                     if v:
                         up[env_k] = v
@@ -632,6 +641,13 @@ class Handler(BaseHTTPRequestHandler):
                     out["canvas"] = canvas.due_sentence(7)
                 except Exception as e:  # noqa: BLE001
                     out["canvas"] = f"Canvas error: {str(e)[:120]}"
+                try:
+                    from .. import github
+                    github._cache.clear()
+                    out["github"] = github.activity_sentence() if github.connected() else \
+                        "Not connected. " + github._local_activity()
+                except Exception as e:  # noqa: BLE001
+                    out["github"] = f"GitHub error: {str(e)[:120]}"
                 try:
                     out["calendar"] = mac.calendar_sentence("today")
                 except Exception as e:  # noqa: BLE001

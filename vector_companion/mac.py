@@ -230,7 +230,8 @@ def ask_claude(question: str) -> str:
     q = question.strip().strip("?.") + "?"
     if re.search(r"\b(what (should|do) i do next|what next|plan|priorit|what to (do|work on)|focus on)\b", q, re.I):
         from . import canvas
-        ctx = "\n\n".join(x for x in (canvas.context(), calendar_context()) if x)
+        from . import github
+        ctx = "\n\n".join(x for x in (canvas.context(), calendar_context(), github.context()) if x)
         if ctx:
             q = f"{q}\n\nHere's what I have going on:\n{ctx}"
     subprocess.Popen(["open", "https://claude.ai/new?q=" + urllib.parse.quote(q)])
@@ -254,6 +255,10 @@ PATTERNS = [
 def skill(text: str) -> str | None:
     """Handle a Mac request, or None if this isn't one."""
     t = text.strip().rstrip(".!?")
+    from . import github
+    gh = github.skill(t)
+    if gh is not None:
+        return gh
     for pat, kind in PATTERNS:
         m = re.search(pat, t, re.I)
         if not m:
@@ -301,5 +306,5 @@ def plan_context(text: str) -> str:
     """For 'what should I do next?': what's due and what's on the calendar, so the answer is real."""
     if not PLANNING.search(text or ""):
         return ""
-    from . import canvas
-    return "\n\n".join(x for x in (canvas.context(), calendar_context()) if x)
+    from . import canvas, github
+    return "\n\n".join(x for x in (canvas.context(), calendar_context(), github.context()) if x)

@@ -200,6 +200,10 @@ def due_sentence(days: int = 7, only: str = "") -> str:
     if not items:
         return (f"Nothing due on Canvas {only}." if only else f"Nothing due on Canvas in the next {days} days.") + late
     when = (lambda i: "") if only else (lambda i: f", due {_day(i['due'])}")
+    me = (S.read_env().get("VECTOR_OWNER") or "").lower()
+    for i in items:  # personal calendar events carry your own name as the 'course'
+        if me and i["course"].lower().startswith(me):
+            i["course"] = ""
     parts = [f"{_clean_title(i['title'])} for {_short_course(i['course'])}{when(i)}" if i["course"]
              else f"{_clean_title(i['title'])}{when(i)}" for i in items[:4]]
     more = f" Plus {len(items) - 4} more." if len(items) > 4 else ""

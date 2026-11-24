@@ -699,6 +699,14 @@ async function refreshEars() {
   $("#ears-reply").textContent = e.last_reply ? "Reply: " + e.last_reply.slice(0, 140) : "";
 }
 $("#ears-restart").addEventListener("click", async () => { await tryApi("/api/ears/restart", {}, "Restarting Ears"); setTimeout(refreshEars, 2500); });
+async function askJarvis() {
+  const text = $("#ask-text").value.trim(); if (!text) return;
+  $("#ask-reply").textContent = "Thinking...";
+  let r = {}; try { r = await api("/api/ask", { text, speak: true }); } catch (e) { $("#ask-reply").textContent = "Couldn't reach the brain"; return; }
+  $("#ask-reply").textContent = (r.parts || []).join(" ") + (r.seconds ? ` (${r.seconds}s)` : "");
+}
+$("#ask-btn").addEventListener("click", askJarvis);
+$("#ask-text").addEventListener("keydown", e => { if (e.key === "Enter") askJarvis(); });
 let ttsT;
 async function loadTts() {
   let t = {}; try { t = await api("/api/tts"); } catch { return; }

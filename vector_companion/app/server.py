@@ -603,6 +603,19 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/settings":
                 return self._json({"app": S.save(b.get("app", {})),
                                    "brain": save_brain(b["brain"]) if "brain" in b else brain_settings()})
+            if path == "/api/ask":  # type to Jarvis: same brain as voice (fast path or OpenJarvis)
+                from .. import voice
+                text = str(b.get("text", "")).strip()[:1000]
+                parts, t0 = [], time.time()
+                for part in voice.respond_stream(text, []):
+                    if part and part.strip():
+                        parts.append(part)
+                        if b.get("speak"):
+                            try:
+                                cc.call("/say", {"text": part}, timeout=90)
+                            except Exception:  # noqa: BLE001
+                                pass
+                return self._json({"parts": parts, "seconds": round(time.time() - t0, 1)})
             if path == "/api/tts/install":
                 from .. import tts
                 tts.install_async(str(b.get("voice", "")) or None)

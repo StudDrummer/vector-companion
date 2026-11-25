@@ -297,8 +297,19 @@ joy.addEventListener("pointerup", joyEnd); joy.addEventListener("pointercancel",
 // head / lift: precise angle & height through the companion (Python SDK)
 const sendHead = debounce(v => tryApi("/api/companion/head", { deg: +v }), 120);
 const sendLift = debounce(v => tryApi("/api/companion/lift", { height: v / 100 }), 120);
-function setHead(v) { v = Math.max(-22, Math.min(45, +v)); $("#head").value = v; $("#head-v").innerHTML = v + "&deg;"; sendHead(v); }
-function setLift(v) { v = Math.max(0, Math.min(100, +v)); $("#lift").value = v; $("#lift-v").textContent = v + "%"; sendLift(v); }
+let poseTouchedAt = 0, poseDragging = false;
+["#head", "#lift"].forEach(sel => {
+  $(sel).addEventListener("pointerdown", () => { poseDragging = true; poseTouchedAt = Date.now(); });
+  window.addEventListener("pointerup", () => { if (poseDragging) { poseDragging = false; poseTouchedAt = Date.now(); } });
+});
+function showPose(p) {  // put the sliders where his head and lift really are
+  if (!p || poseDragging || Date.now() - poseTouchedAt < 2500) return;
+  const hd = Math.round(p.head_deg), lf = Math.round(p.lift * 100);
+  if (+$("#head").value !== hd) { $("#head").value = hd; $("#head-v").innerHTML = hd + "&deg;"; }
+  if (+$("#lift").value !== lf) { $("#lift").value = lf; $("#lift-v").textContent = lf + "%"; }
+}
+function setHead(v) { poseTouchedAt = Date.now(); v = Math.max(-22, Math.min(45, +v)); $("#head").value = v; $("#head-v").innerHTML = v + "&deg;"; sendHead(v); }
+function setLift(v) { poseTouchedAt = Date.now(); v = Math.max(0, Math.min(100, +v)); $("#lift").value = v; $("#lift-v").textContent = v + "%"; sendLift(v); }
 $("#head").addEventListener("input", e => setHead(e.target.value));
 $("#lift").addEventListener("input", e => setLift(e.target.value));
 $("#stop-all").addEventListener("click", () => { stopDrive(); toast("Stopped"); });
@@ -778,6 +789,7 @@ async function syncLive() {
   let h; try { h = await api("/api/companion/health"); } catch { return; }
   if (!h) return;
   LIVE = h;
+  showPose(h.pose);
   const mm = s => `${Math.floor(s / 60)}:${String(Math.max(0, s % 60)).padStart(2, "0")}`;
   // sidebar chip
   const parts = [];
@@ -788,6 +800,7 @@ async function syncLive() {
   if (h.game && h.game.active) parts.push(`<b>Blackjack</b> <span class="sub">you have ${h.game.you_total}</span>`);
   if (h.quiz_state) parts.push(`<b>Quiz</b> <span class="sub">question ${h.quiz_state.q} of ${h.quiz_state.of} · ${h.quiz_state.score} right</span>`);
   if (h.mirror) parts.push(`<b>Camera on his face</b>`);
+  if (h.busy) parts.push(`<b>${esc(h.busy.replace(/_/g, " ").replace(/^./, c => c.toUpperCase()))}</b> <span class="sub">in progress</span>`);
   if (h.guard) parts.push(`<b>Guarding your desk</b>`);
   if (h.speaking && !parts.length) parts.push(`<span class="sub">Speaking...</span>`);
   const now = $("#sb-now");
@@ -809,7 +822,7 @@ async function syncLive() {
   const gOn = $("#guard-on");
   if (gOn && document.activeElement !== gOn) gOn.checked = !!h.guard;
 }
-setInterval(syncLive, 2500);
+setInterval(() => { if (current === "drive" || Date.now() % 2500 < 1000) syncLive(); }, 1000);
 syncLive();
 
 /* ---------------- boot ---------------- */

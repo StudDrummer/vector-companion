@@ -269,8 +269,16 @@ class Companion:
 
     # ------------------------------------------------------------ keep him still while docked
     def _sync_reserve(self):
-        want = (bool(safety().get("dock_lock")) and safety().get("keep_still", True) and self.connected
-                and time.time() >= self.still_paused_until)
+        # Hold him still whenever he's on the charger (or the dock lock is on): his idle behaviors otherwise
+        # move his head and lift away from where you put them, and fight every command (that was the lag).
+        on_dock = False
+        try:
+            on_dock = bool(self._robot and self._robot.status.is_on_charger)
+        except Exception:  # noqa: BLE001
+            pass
+        m = getattr(getattr(self, "actions", None), "motion", None)
+        want = (safety().get("keep_still", True) and self.connected and time.time() >= self.still_paused_until
+                and (bool(safety().get("dock_lock")) or on_dock) and not (m and m.busy))
         if want and self.reserve is None:
             def hold():
                 from anki_vector.behavior import ReserveBehaviorControl
@@ -333,7 +341,10 @@ class Companion:
         threading.Timer(self.still_paused_until - time.time() + 0.5, self._sync_reserve).start()
 
     def _look_up(self):
-        """While he sits still, tilt his head up so he can see (and recognize) you."""
+        """While he sits still, tilt his head up so he can see (and recognize) you, unless you've just
+        put his head somewhere yourself."""
+        if time.time() - getattr(self, "user_pose_at", 0) < 1800:
+            return
         try:
             from anki_vector.util import degrees
             with self.control(wait=5) as r:
@@ -607,8 +618,8 @@ class Companion:
                         raise
                 except Exception as e:  # noqa: BLE001
                     if player is None:
-                        self.audio_broken_until = time.time() + 600
-                        log(f"voice through his speaker failed, using his own voice for 10 min: {e!r}"[:300])
+                        self.audio_broken_until = time.time() + 90  # one hiccup (e.g. mid-drive) shouldn't cost 10 min
+                        log(f"voice through his speaker failed, using his own voice for 90 s: {e!r}"[:300])
                         (r or self.robot).behavior.say_text(text)
             if player is not None:
                 try:
@@ -681,7 +692,25 @@ class Companion:
         with self.control() as r:
             r.behavior.set_lift_height(max(0.0, min(1.0, float(height))), duration=0.6)
 
+    def pose_now(self) -> dict | None:
+        """Where his head and lift really are (from his last status message, no extra round trip)."""
+        r = self._robot
+        if r is None:
+            return None
+        try:
+            import math
+            head = math.degrees(r.head_angle_rad)
+            lift = (r.lift_height_mm - 32.0) / (92.0 - 32.0)
+            return {"head_deg": round(head, 1), "lift": round(max(0.0, min(1.0, lift)), 2),
+                    "on_charger": bool(r.status.is_on_charger)}
+        except Exception:  # noqa: BLE001
+            return None
+
     def _move_later(self, part: str, value: float):
+        self.user_pose_at = time.time()
+        return self._move_later2(part, value)
+
+    def _move_later2(self, part: str, value: float):
         """Slider moves from the app: answer at once, and if you drag fast only the latest position is used."""
         self.move_target[part] = value
         if not self.move_busy.get(part):
@@ -1510,7 +1539,8 @@ class Handler(BaseHTTPRequestHandler):
                                         "game": COMP.actions.bj.state() if COMP.actions.bj else None,
                                         "prefs": prefs(), "safety": safety(), "guard": bool(COMP.guard),
                                         "speaking": time.time() < COMP.speaking_until, "voice": COMP.voice_engine(),
-                                        "cube": COMP.cube_connected})
+                                        "cube": COMP.cube_connected, "pose": COMP.pose_now(),
+                                        "busy": (COMP.actions.motion.busy if getattr(COMP.actions, "motion", None) else None)})
             if u.path == "/reminders":
                 return self._send(200, {"reminders": COMP.reminders.items})
             if u.path == "/stats":

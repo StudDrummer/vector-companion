@@ -55,6 +55,7 @@ class Motion:
         if not self.lock.acquire(blocking=False):
             raise RuntimeError(f"He's still busy with {self.busy.replace('_', ' ')}.")
         self.busy = action
+        self.c.pause_still(5)  # let go of the hold so he can move; it comes back once he's docked and idle
         threading.Thread(target=self._run, args=(action,), daemon=True).start()
         return {"started": action}
 
@@ -68,7 +69,8 @@ class Motion:
             log(f"motion: {action} failed: {msg}")
             self._say(self._friendly(action, msg))
         finally:
-            self.c.cube_handled_until = time.time() + 5  # the cube settling after he lets go isn't a tap
+            self.c.cube_handled_until = time.time() + 5
+            self.c.still_paused_until = 0  # the cube settling after he lets go isn't a tap
             self.busy = None
             self.lock.release()
 

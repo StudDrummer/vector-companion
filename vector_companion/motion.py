@@ -327,31 +327,34 @@ class Motion:
         with self.c.control():
             r = self.c.raw
             docked = r.status.is_on_charger
-            seq = [("head", 30), ("lift", 0.9), ("head", 0), ("lift", 0.1), ("head", 35), ("lift", 0.7),
-                   ("turn", 25), ("turn", -50), ("turn", 25), ("head", 10), ("lift", 1.0), ("head", 40),
-                   ("lift", 0.0), ("head", -5), ("lift", 0.8), ("head", 25), ("turn", -30), ("turn", 30),
-                   ("lift", 0.0), ("head", 15)]
-            for i, (kind, val) in enumerate(seq):
+            # motor speeds instead of 'move to' commands: each is fire-and-forget, so the beat holds even on
+            # slow Wi-Fi (waiting for every move to report back made the routine drag)
+            pattern = [(3, 4, 1), (-3, 4, -1), (3, -4, 1), (-3, -4, -1)] * 2 + [(3, 6, 2), (-3, -6, -2)] * 2 + \
+                      [(2, 4, 1), (-2, -4, -1), (3, 5, 2), (-3, -5, -2)] * 2
+            for i, (hd, lf, tw) in enumerate(pattern):
                 if self.cancel.is_set():
                     break
-                if jarvis or i % 4 == 0:
-                    img = face_art.equalizer(i / len(seq) * 3, face_art.CYAN if jarvis else face_art.PINK)
+                t0 = time.time()
+                if (jarvis and i % 2 == 0) or i % 4 == 0:
+                    img = face_art.equalizer(i / len(pattern) * 3, face_art.CYAN if jarvis else face_art.PINK)
                     try:
-                        self.c.put_screen(r, img, beat * 4 + 0.5)
+                        self._call(lambda: self.c.put_screen(r, img, beat * 4 + 0.5), 3, "hud")
                     except Exception:  # noqa: BLE001
                         pass
-                t0 = time.time()
-                if kind == "turn":
-                    if docked:  # never spin his wheels on the charger: a head bob instead
-                        self._call(lambda: r.behavior.set_head_angle(_deg(20 if val > 0 else 5), duration=beat * 0.8),
-                                   6, "set_head_angle")
-                    else:
-                        self._call(lambda: r.behavior.turn_in_place(_deg(val), speed=degrees(200)), 6, "turn_in_place")
-                elif kind == "lift":
-                    self._call(lambda: r.behavior.set_lift_height(val, duration=beat * 0.8), 6, "set_lift_height")
-                else:
-                    self._call(lambda: r.behavior.set_head_angle(_deg(val), duration=beat * 0.8), 6, "set_head_angle")
+                self._call(lambda: r.motors.set_head_motor(hd), 3, "set_head_motor")
+                self._call(lambda: r.motors.set_lift_motor(lf), 3, "set_lift_motor")
+                if not docked:  # never spin his wheels on the charger
+                    w = 70 * tw
+                    self._call(lambda: r.motors.set_wheel_motors(w, -w), 3, "set_wheel_motors")
                 time.sleep(max(0.0, beat - (time.time() - t0)))
+            for fn in (lambda: r.motors.set_wheel_motors(0, 0), lambda: r.motors.set_head_motor(0),
+                       lambda: r.motors.set_lift_motor(0)):
+                try:
+                    self._call(fn, 3, "stop_motors")
+                except Exception:  # noqa: BLE001
+                    pass
+            self._call(lambda: r.behavior.set_lift_height(0.0), 8, "set_lift_height")
+            self._call(lambda: r.behavior.set_head_angle(_deg(15)), 8, "set_head_angle")
             if not jarvis:
                 trig = self.c.find_trigger("CelebrateSuccess", "FistBumpSuccess")
                 if trig:

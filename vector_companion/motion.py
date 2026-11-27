@@ -82,7 +82,7 @@ class Motion:
         self.busy = action
         self.step = ""
         self.cancel.clear()
-        self.c.pause_still(5, keep_control=True)  # drop the still-hold (control itself is kept the whole time)
+        # the still-hold stays on: our commands outrank it, and dropping it made him lose control mid-move
         threading.Thread(target=self._run, args=(action,), daemon=True).start()
         threading.Thread(target=self._hud, args=(action,), daemon=True).start()
         return {"started": action}

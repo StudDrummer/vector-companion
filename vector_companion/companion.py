@@ -285,7 +285,7 @@ class Companion:
             pass
         m = getattr(getattr(self, "actions", None), "motion", None)
         want = (safety().get("keep_still", True) and self.connected and time.time() >= self.still_paused_until
-                and (bool(safety().get("dock_lock")) or jarvis_mode()) and not (m and m.busy))
+                and (bool(safety().get("dock_lock")) or jarvis_mode() or bool(m and m.busy)))
         if want and self.reserve is None:
             def hold():
                 from anki_vector.behavior import ReserveBehaviorControl

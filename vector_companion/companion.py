@@ -377,8 +377,13 @@ class Companion:
         fut = self.pool.submit(lambda: r.connect(timeout=15))
         try:
             fut.result(timeout=20)
-        except FutTimeout:
-            raise VectorOffline("connect timed out") from None
+        except BaseException as e:
+            # a failed attempt still opened sockets and threads: close them, or they pile up while he's
+            # off/asleep (that's what forced a restart every two hours overnight)
+            threading.Thread(target=self._safe_disconnect, args=(r,), daemon=True).start()
+            if isinstance(e, FutTimeout):
+                raise VectorOffline("connect timed out") from None
+            raise
         try:
             fut2 = self.pool.submit(r.anim.load_animation_trigger_list)
             fut2.result(timeout=15)

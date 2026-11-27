@@ -251,6 +251,23 @@ class Map:
                             self.floor[k] = FLOOR
                             self.dirty = True
 
+    def close_holes(self):
+        """Single unknown cells surrounded by floor (gaps between driven lines) are floor."""
+        with self.lock:
+            i0, j0, i1, j1 = self._bbox(pad=1)
+            fill = []
+            for j in range(max(1, j0), min(N - 1, j1)):
+                for i in range(max(1, i0), min(N - 1, i1)):
+                    if self.floor[j * N + i] != UNKNOWN:
+                        continue
+                    n = sum(self.floor[(j + dj) * N + i + di] == FLOOR for di in (-1, 0, 1) for dj in (-1, 0, 1))
+                    if n >= 6:
+                        fill.append(j * N + i)
+            for k in fill:
+                self.floor[k] = FLOOR
+            if fill:
+                self.dirty = True
+
     # ------------------------------------------------------------ zones
     def zone_cells(self):
         out = set()
@@ -465,9 +482,12 @@ class Map:
         return None
 
     def ahead_marked(self, x, y, th, look):
+        """Anything known in the strip his body will sweep: marked areas, edges, obstacles seen before
+        (the distance sensor only looks straight ahead, so this is what stops side-swipes)."""
         zc = self.zone_cells() - self.zone_cells_dock()
-        for i, j in self._ahead(x, y, th, FRONT, FRONT + look, 35):
-            if (i, j) in zc or self.floor[j * N + i] == EDGE:
+        for i, j in self._ahead(x, y, th, FRONT - 10, FRONT + look, 38):
+            k = j * N + i
+            if (i, j) in zc or self.floor[k] == EDGE or self.obst[k] >= OBST:
                 return True
         return False
 
@@ -522,10 +542,17 @@ class Map:
 
 # ---------------------------------------------------------------- driving on the map
 class Driver:
-    """Slow, checked driving: distance sensor before every hop, edges and bumps go on the map."""
+    """Slow, checked driving: distance sensor before every hop, edges and bumps go on the map.
 
-    def __init__(self, m: Map, r, call, cancel: threading.Event, log=print):
+    His own reflexes (the edge reaction, the 'bumped into something' reaction) outrank us: they take over,
+    back him up fast and blind, and that's what made him speed up and hit things. So: approach slowly (so
+    they rarely fire), notice when one has fired, wait it out, take control back and mark the spot, and
+    never add a blind reverse of our own on top. Low lips (the desk mat) get a real climbing attempt.
+    """
+
+    def __init__(self, m: Map, r, call, cancel: threading.Event, log=print, control_ok=None, regain=None):
         self.m, self.r, self.call, self.cancel, self.log = m, r, call, cancel, log
+        self.control_ok, self.regain = control_ok, regain
         self.reach = None
 
     def check(self):
@@ -542,42 +569,90 @@ class Driver:
             raise Lost("lost track of where the dock is")
         return p
 
-    def look(self):
-        try:
-            p = self.r.proximity.last_sensor_reading
-            if p is None or getattr(p, "is_lift_in_fov", False):
-                return None
-            found, dist = bool(p.found_object), float(p.distance.distance_mm)
-        except Exception:  # noqa: BLE001
+    def look(self, samples: int = 1):
+        """Distance sensor: the nearest of a few readings (one stale reading once let him drive into things)."""
+        found, dist = False, PROX_MAX + 1.0
+        got = False
+        for i in range(samples):
+            if i:
+                time.sleep(0.08)
+            try:
+                p = self.r.proximity.last_sensor_reading
+                if p is None or getattr(p, "is_lift_in_fov", False):
+                    continue
+                got = True
+                if p.found_object and p.distance.distance_mm < dist:
+                    found, dist = True, float(p.distance.distance_mm)
+            except Exception:  # noqa: BLE001
+                continue
+        if not got:
             return None
         x, y, th = self.pose()
-        self.m.mark_prox(x, y, th, found, dist)
-        return found, dist
+        self.m.mark_prox(x, y, th, found, dist if found else PROX_MAX)
+        return found, (dist if found else PROX_MAX)
 
-    def turn_to(self, heading):
+    def reflex(self) -> bool:
+        """Did one of his own reactions just take control? If so, let it finish and take control back."""
+        if self.control_ok is None or self.control_ok():
+            return False
+        self.log("deskmap: his own reflex took over (edge or bump reaction); waiting it out")
+        time.sleep(2.5)
+        try:
+            if self.regain:
+                self.regain()
+        except Exception as e:  # noqa: BLE001
+            self.log(f"deskmap: couldn't take control back ({e.__class__.__name__})")
+        return True
+
+    def room_around(self, rad=62) -> bool:
+        """Is there room to turn in place? (His corners sweep about 6 cm out.)"""
+        x, y, _ = self.pose()
+        with self.m.lock:
+            for dx in range(-rad, rad + 1, CELL // 2):
+                for dy in range(-rad, rad + 1, CELL // 2):
+                    if dx * dx + dy * dy > rad * rad:
+                        continue
+                    c = self.m.cell(x + dx, y + dy)
+                    if not c or dx * dx + dy * dy <= 30 * 30:  # not the cell he's on
+                        continue
+                    k = c[1] * N + c[0]
+                    # things get hit by his corners (6 cm out); an edge only matters closer (overhang is fine)
+                    if self.m.obst[k] >= OBST + 2 or (self.m.floor[k] == EDGE and dx * dx + dy * dy < 42 * 42):
+                        return False
+        return True
+
+    def turn_to(self, heading) -> bool:
         from anki_vector.util import degrees
         _, _, th = self.pose()
         d = wrap(heading - th)
         if abs(d) > math.radians(4):
-            self.call(lambda: self.r.behavior.turn_in_place(degrees(math.degrees(d)), speed=degrees(80)), 15, "turn_in_place")
-        time.sleep(0.15)  # a fresh distance reading for the new direction
+            if abs(d) > math.radians(35) and not self.room_around():
+                self.back(30)
+                if not self.room_around():
+                    self.log("deskmap: too cramped to turn here")
+                    return False
+            self.call(lambda: self.r.behavior.turn_in_place(degrees(math.degrees(d)), speed=degrees(70)), 15, "turn_in_place")
+            if self.reflex():
+                return False
+        time.sleep(0.3)  # fresh distance readings for the new direction
+        return True
 
-    def hop(self, mm: float, speed: float = 50) -> str:
+    def hop(self, mm: float, speed: float = 45) -> str:
         """One short forward move. Returns ok / edge / blocked / stuck."""
         from anki_vector.util import distance_mm, speed_mmps
         x0, y0, th = self.pose()
-        seen = self.look()
+        seen = self.look(samples=3)
         if seen is None:  # the distance sensor is blocked (lift sagging into its view): never drive blind
             try:
                 self.call(lambda: self.r.behavior.set_lift_height(1.0), 10, "set_lift_height")
             except Exception:  # noqa: BLE001
                 pass
             time.sleep(0.3)
-            seen = self.look()
+            seen = self.look(samples=3)
             if seen is None:
                 self.log("deskmap: distance sensor unusable, not moving")
                 return "blocked"
-        if seen[0] and seen[1] < mm + 70:
+        if seen[0] and seen[1] < mm + 90:
             return "blocked"
         if self.m.ahead_marked(x0, y0, th, mm + 50):  # a keep-out area you marked, or a known edge
             return "blocked"
@@ -592,37 +667,86 @@ class Driver:
         x1, y1, _ = self.pose()
         self.reach = (x1, y1)
         self.m.mark_path(x0, y0, x1, y1)
+        if self.reflex():  # his edge/bump reaction already backed him off: don't add our own reverse
+            self.m.mark_edge(x1, y1, th)
+            return "edge"
         if self.r.status.is_cliff_detected:
             self.m.mark_edge(x1, y1, th)
-            self.back(60)
+            self.back(40)
             return "edge"
         if math.hypot(x1 - x0, y1 - y0) < 0.35 * mm:
-            self.m.mark_block(x1, y1, th)
-            self.back(30)
+            # pushing and not moving, with nothing in front for the sensor: a low lip (the mat's edge, a cable)
+            if not (seen[0] and seen[1] < 200) and self.climb():
+                return "ok"
+            self.m.mark_block(*self.pose())
+            self.back(25)
             return "stuck"
         self.look()
         return "ok"
 
-    def back(self, mm: float):
+    def climb(self) -> bool:
+        """Get over a low lip: arms up and a firmer push; then push down with the arms to lift his front."""
         from anki_vector.util import distance_mm, speed_mmps
-        x0, y0, _ = self.pose()
+        r = self.r
+        for attempt in (1, 2):
+            x0, y0, _ = self.pose()
+            try:
+                self.call(lambda: r.behavior.set_lift_height(1.0), 8, "set_lift_height")
+                if attempt == 1:
+                    self.call(lambda: r.behavior.drive_straight(distance_mm(50), speed_mmps(70), should_play_anim=False),
+                              12, "drive_straight")
+                else:  # arms down against the desk: tilts his front up onto the lip while the treads push
+                    self.back(15)
+                    self.call(lambda: r.motors.set_lift_motor(-4), 3, "set_lift_motor")
+                    self.call(lambda: r.motors.set_wheel_motors(55, 55), 3, "set_wheel_motors")
+                    time.sleep(1.2)
+                    self.call(lambda: r.motors.set_wheel_motors(0, 0), 3, "set_wheel_motors")
+                    self.call(lambda: r.motors.set_lift_motor(0), 3, "set_lift_motor")
+                    self.call(lambda: r.behavior.set_lift_height(1.0), 8, "set_lift_height")
+            except Exception as e:  # noqa: BLE001
+                self.log(f"deskmap: climb attempt {attempt} interrupted ({e.__class__.__name__})")
+            if self.reflex() or self.r.status.is_cliff_detected:
+                return False
+            x1, y1, _ = self.pose()
+            if math.hypot(x1 - x0, y1 - y0) > 30:
+                self.log(f"deskmap: climbed over a low edge (attempt {attempt})")
+                self.m.mark_path(x0, y0, x1, y1)
+                return True
+        self.log("deskmap: couldn't get over a low edge")
+        return False
+
+    def back(self, mm: float) -> float:
+        """Reverse only over floor he has just driven (no sensor at the back), and never far."""
+        from anki_vector.util import distance_mm, speed_mmps
+        x0, y0, th = self.pose()
+        ok_mm = 0
+        for d in range(10, int(min(mm, 50)) + 1, 10):
+            cells = self.m._ahead(x0, y0, th + math.pi, FRONT - 5 + d - 10, FRONT - 5 + d, 10)
+            if any(self.m.floor[j * N + i] != FLOOR or self.m.obst[j * N + i] >= OBST for i, j in cells):
+                break
+            ok_mm = d
+        if ok_mm < 10:
+            return 0.0
         try:
-            self.call(lambda: self.r.behavior.drive_straight(distance_mm(-mm), speed_mmps(70), should_play_anim=False),
-                      8 + 2 * mm / 70, "drive_straight")
+            self.call(lambda: self.r.behavior.drive_straight(distance_mm(-ok_mm), speed_mmps(40), should_play_anim=False),
+                      10 + 2 * ok_mm / 40, "drive_straight")
         except Exception:  # noqa: BLE001
             pass
+        self.reflex()
         x1, y1, _ = self.pose()
         self.m.mark_path(x0, y0, x1, y1)
+        return ok_mm
 
-    def follow(self, way, hop=100) -> bool:
+    def follow(self, way, hop=90) -> bool:
         for wx, wy in way:
             while True:
                 x, y, _ = self.pose()
                 d = math.hypot(wx - x, wy - y)
                 if d < 25:
                     break
-                self.turn_to(math.atan2(wy - y, wx - x))
-                if self.hop(min(d, hop), speed=70) != "ok":
+                if not self.turn_to(math.atan2(wy - y, wx - x)):
+                    return False
+                if self.hop(min(d, hop), speed=60) != "ok":
                     return False
         return True
 
@@ -651,21 +775,21 @@ def fan(m: Map, d: Driver, centre, bearings, deadline, max_ray=1500):
     for b in sorted(bearings, key=lambda b: wrap(b)):
         if time.time() > deadline:
             break
-        d.turn_to(b)
+        if not d.turn_to(b):
+            continue
         start = d.pose()[:2]
         d.reach, why = start, "max"
         while math.hypot(d.reach[0] - start[0], d.reach[1] - start[1]) < max_ray:
             seen = d.look()
             far = not seen or not seen[0] or seen[1] > 250
-            why = d.hop(80 if far else 40, speed=60 if far else 40)
+            why = d.hop(70 if far else 40, speed=50 if far else 35)
             if why != "ok":
                 break
         reach = d.reach
         rays.append((wrap(b), reach, why))
         x, y, _ = d.pose()
-        back = math.hypot(x - start[0], y - start[1])
-        if back > 15:
-            d.back(back)
+        if math.hypot(x - start[0], y - start[1]) > 25:
+            d.follow([start])  # turn round and drive back forward, sensor first (no long blind reverse)
     rays.sort(key=lambda t: t[0])
     for (b1, p1, w1), (b2, p2, w2) in zip(rays, rays[1:] + rays[:1]):
         gap = wrap(b2 - b1) % (2 * math.pi)
@@ -680,6 +804,7 @@ def fan(m: Map, d: Driver, centre, bearings, deadline, max_ray=1500):
         elif w2 in ("blocked", "stuck") and l1 > l2:
             p1 = (centre[0] + (p1[0] - centre[0]) * l2 / l1, centre[1] + (p1[1] - centre[1]) * l2 / l1)
         m.fill_triangle(centre, p1, p2)
+    m.close_holes()
     return rays
 
 
@@ -687,7 +812,8 @@ def go_home(m: Map, d: Driver, r, call, log=print) -> bool:
     """Back to a spot in front of the dock, facing it, then let him reverse on. Re-anchors the map."""
     try:
         x, y, _ = d.pose()
-        way = m.plan((x, y), (170, 0), clear=60)
+        m.close_holes()
+        way = m.plan((x, y), (170, 0), clear=60) or m.plan((x, y), (170, 0), clear=40)
         if way:
             d.follow(way)
         d.turn_to(math.pi)
@@ -712,7 +838,7 @@ def go_home(m: Map, d: Driver, r, call, log=print) -> bool:
     return False
 
 
-def scan(m: Map, r, call, cancel, say=print, log=print, minutes: float = 10) -> dict:
+def scan(m: Map, r, call, cancel, say=print, log=print, minutes: float = 10, control=(None, None)) -> dict:
     """The full desk scan. He starts and ends on the dock."""
     from anki_vector.util import degrees
     deadline = time.time() + minutes * 60
@@ -725,7 +851,7 @@ def scan(m: Map, r, call, cancel, say=print, log=print, minutes: float = 10) -> 
         m.clear_layers()
         m.set_anchor(Map.odom(r))
         m.remember_charger(r)
-    d = Driver(m, r, call, cancel, log)
+    d = Driver(m, r, call, cancel, log, *control)
     m.progress = {"what": "scanning", "step": "leaving the dock", "started": time.time()}
     # lift fully up: it clears the mat's edge and stays out of the distance sensor's view
     call(lambda: r.behavior.set_lift_height(1.0), 10, "set_lift_height")
@@ -770,7 +896,7 @@ def scan(m: Map, r, call, cancel, say=print, log=print, minutes: float = 10) -> 
     return out
 
 
-def roam(m: Map, r, call, cancel, log=print, minutes: float = 3, pause=None) -> dict:
+def roam(m: Map, r, call, cancel, log=print, minutes: float = 3, pause=None, control=(None, None)) -> dict:
     """Wander the mapped desk: random safe spots, planned paths, back to the dock at the end."""
     from anki_vector.util import degrees
     if not m.scanned:
@@ -780,7 +906,7 @@ def roam(m: Map, r, call, cancel, log=print, minutes: float = 3, pause=None) -> 
         m.remember_charger(r)
     elif not m.anchored(r) and not m.anchor_from_charger(r):
         raise RuntimeError("I don't know where I am on the desk. Put me on my charger and ask again.")
-    d = Driver(m, r, call, cancel, log)
+    d = Driver(m, r, call, cancel, log, *control)
     deadline = time.time() + minutes * 60
     m.progress = {"what": "roaming", "step": "leaving the dock", "started": time.time()}
     call(lambda: r.behavior.set_lift_height(1.0), 10, "set_lift_height")

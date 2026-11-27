@@ -103,7 +103,7 @@ class Motion:
                 except Exception:  # noqa: BLE001
                     pass
             k += 1
-            time.sleep(1.2)
+            time.sleep(4.0)  # each frame is ~35 KB over his Wi-Fi: don't crowd out the driving commands
 
     def _run(self, action: str):
         from .companion import log
@@ -133,6 +133,9 @@ class Motion:
     @staticmethod
     def _friendly(action, msg):
         m = msg.lower()
+        if "pick up" in m:
+            return ("I couldn't get a grip on the cube, sir. Put it on open, flat desk, away from the mat's edge."
+                    if _jarvis() else "I couldn't pick up my cube. Put it somewhere flat and open!")
         if "cube" in m and ("not" in m or "find" in m or "no " in m):
             return "I can't find my cube. Put it in front of me and try again."
         if "charger" in m or "map" in m or "where i am" in m:
@@ -194,6 +197,16 @@ class Motion:
                 self._call(lambda: r.behavior.drive_straight(_mm(-80), _speed(60)), 15, "drive_straight")
         raise RuntimeError("couldn't find the cube")
 
+    def _control(self):
+        """(still in control?, take it back): lets desk driving notice when one of his reflexes took over."""
+        c = self.c
+
+        def regain():
+            r = c.raw
+            c.call(lambda: r.conn.request_control(timeout=6), 8, "request_control")
+            c.ctl_held = True
+        return c.has_control, regain
+
     def _safe_forward(self, r, mm: float):
         """Forward in short checked hops: stops for the desk edge, marked areas and anything in the way."""
         from . import deskmap
@@ -201,7 +214,7 @@ class Motion:
         if not m.anchored(r):
             m.anchor_from_charger(r)
         if m.anchored(r):
-            d = deskmap.Driver(m, r, self._call, self.cancel)
+            d = deskmap.Driver(m, r, self._call, self.cancel, print, *self._control())
             for _ in range(int(mm // 50)):
                 if d.hop(50, speed=60) != "ok":
                     break
@@ -229,13 +242,28 @@ class Motion:
 
     # ------------------------------------------------------------ actions
     def fetch_cube(self):
+        from .companion import log
         with self.c.control():
             r = self.c.raw  # unwrapped: these calls get their own long time limits below
-            self._say("Fetching my cube.")
+            self._say("Retrieving the cube, sir." if _jarvis() else "Fetching my cube.")
             self._off_dock(r)
             cube = self._cube(r)
             self.c.cube_color("blue")
-            self._call(lambda: r.behavior.pickup_object(cube, num_retries=2), 60, "pickup_object")
+            ok_ctl, regain = self._control()
+            for attempt in (1, 2):
+                try:
+                    res = self._call(lambda: r.behavior.pickup_object(cube, num_retries=1), 90, "pickup_object")
+                except Exception:  # noqa: BLE001
+                    res = None
+                if r.status.is_carrying_block:
+                    break
+                if not ok_ctl():  # one of his reflexes interrupted the pick-up: take back over and try once more
+                    time.sleep(2.0)
+                    regain()
+                log(f"motion: pick-up attempt {attempt} didn't work ({getattr(res, 'result', res)})")
+                if attempt == 2:
+                    raise RuntimeError("couldn't pick up the cube")
+                cube = self._cube(r)
             if self._face_turn(r):
                 self._safe_forward(r, 150)
             self._call(lambda: r.behavior.place_object_on_ground_here(num_retries=1), 40, "place_object_on_ground_here")
@@ -290,7 +318,7 @@ class Motion:
                   if _jarvis() else "Ooh, let me explore my desk! This takes a few minutes.")
         with self.c.control():
             r = self.c.raw
-            out = deskmap.scan(m, r, self._call, self.cancel, log=log, minutes=12)
+            out = deskmap.scan(m, r, self._call, self.cancel, log=log, minutes=12, control=self._control())
         self.c.desk_changed()
         n = out["obstacles"]
         what = f"{n} thing{'s' if n != 1 else ''} to steer around" if n else "nothing in the way"
@@ -312,7 +340,7 @@ class Motion:
             self._say("Exploring!")
         with self.c.control():
             r = self.c.raw
-            out = deskmap.roam(m, r, self._call, self.cancel, log=log, minutes=3, pause=pause)
+            out = deskmap.roam(m, r, self._call, self.cancel, log=log, minutes=3, pause=pause, control=self._control())
         log(f"motion: roam {out}")
         if not out.get("docked"):
             self._say("I couldn't get back on my charger, sir." if _jarvis() else "Help, I can't find my charger!")

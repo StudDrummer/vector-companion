@@ -615,11 +615,12 @@ class Handler(BaseHTTPRequestHandler):
                     ROBOT.move(lw=lw, rw=rw)
                 return self._json({"ok": True})
             if path == "/api/stop":
+                # the joystick letting go (page change, window blur) must not cancel a task, and must not go
+                # through wire-pod: its own SDK connection takes control away from the companion mid-task
                 try:
-                    cc.call("/stop", {}, timeout=3)
+                    cc.call("/stop", {"all": bool(b.get("all"))}, timeout=3)
                 except Exception:  # noqa: BLE001
-                    pass
-                ROBOT.stop()
+                    ROBOT.stop()
                 return self._json({"ok": True})
             if path == "/api/release":
                 ROBOT.stop()

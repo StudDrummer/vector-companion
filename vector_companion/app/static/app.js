@@ -277,7 +277,11 @@ setInterval(() => {
   api("/api/move", body).catch(e => toast(friendly(e.message), true));
 }, 140);
 function halt(body) { api("/api/move", body).catch(() => { }); }
-function stopDrive() { drive.x = drive.y = drive.head = drive.lift = 0; drive.active = false; drive.keys.clear(); api("/api/stop", {}).catch(() => { }); setKnob(0, 0); }
+function stopDrive(all) {
+  const was = drive.active || drive.keys.size;
+  drive.x = drive.y = drive.head = drive.lift = 0; drive.active = false; drive.keys.clear(); setKnob(0, 0);
+  if (was || all) api("/api/stop", { all: !!all }).catch(() => { });  // only if you were driving (or pressed Stop)
+}
 
 // joystick
 const joy = $("#joy"), knob = $("#knob");
@@ -312,7 +316,7 @@ function setHead(v) { poseTouchedAt = Date.now(); v = Math.max(-22, Math.min(45,
 function setLift(v) { poseTouchedAt = Date.now(); v = Math.max(0, Math.min(100, +v)); $("#lift").value = v; $("#lift-v").textContent = v + "%"; sendLift(v); }
 $("#head").addEventListener("input", e => setHead(e.target.value));
 $("#lift").addEventListener("input", e => setLift(e.target.value));
-$("#stop-all").addEventListener("click", () => { stopDrive(); toast("Stopped"); });
+$("#stop-all").addEventListener("click", () => { stopDrive(true); toast("Stopped"); });
 $("#mirror").addEventListener("change", e => wp("mirror_mode", { enable: e.target.checked ? "true" : "false" }, e.target.checked ? "Camera on his face" : "Face back to normal"));
 
 // keyboard

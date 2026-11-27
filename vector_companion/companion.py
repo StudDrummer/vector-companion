@@ -1869,8 +1869,9 @@ class Handler(BaseHTTPRequestHandler):
             elif u.path == "/drive":
                 COMP.drive(b.get("lw", 0), b.get("rw", 0))
             elif u.path == "/stop":
-                COMP.drive_cmd = {"lw": 0.0, "rw": 0.0, "at": time.time()}
-                if getattr(COMP.actions, "motion", None):
+                if COMP.drive_cmd.get("lw") or COMP.drive_cmd.get("rw"):
+                    COMP.drive_cmd = {"lw": 0.0, "rw": 0.0, "at": time.time()}
+                if b.get("all") and getattr(COMP.actions, "motion", None):
                     COMP.actions.motion.stop()
             elif u.path == "/deskmap":
                 from . import deskmap

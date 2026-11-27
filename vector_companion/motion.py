@@ -231,12 +231,26 @@ class Motion:
     def _face_turn(self, r) -> bool:
         """Turn toward a face he can see (looking up and around for one). True if found."""
         self._call(lambda: r.behavior.set_head_angle(_deg(30)), 10, "set_head_angle")
-        for _ in range(8):
+        # carrying the cube, he sweeps ~11 cm when he turns: no searching turns then, only a look
+        carrying = bool(getattr(r.status, "is_carrying_block", False))
+        fails = 0
+        for _ in range(3 if carrying else 8):
             faces = list(r.world.visible_faces)
             if faces:
-                self._call(lambda: r.behavior.turn_towards_face(faces[0]), 20, "turn_towards_face")
+                try:
+                    self._call(lambda: r.behavior.turn_towards_face(faces[0]), 20, "turn_towards_face")
+                except Exception:  # noqa: BLE001
+                    pass
                 return True
-            self._call(lambda: r.behavior.turn_in_place(_deg(45)), 15, "turn_in_place")
+            if carrying:
+                time.sleep(0.8)
+                continue
+            try:
+                self._call(lambda: r.behavior.turn_in_place(_deg(45), speed=_deg(90)), 12, "turn_in_place")
+            except Exception:  # noqa: BLE001  (blocked by something: stop searching rather than shove it)
+                fails += 1
+                if fails >= 2:
+                    return False
             time.sleep(0.8)
         return False
 

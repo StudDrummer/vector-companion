@@ -795,6 +795,7 @@ class Companion:
         try:
             p = r.proximity.last_sensor_reading
             out["distance_mm"] = round(p.distance.distance_mm) if p.found_object else None
+            out["lift_in_view"] = bool(p.is_lift_in_fov)
         except Exception:  # noqa: BLE001
             out["distance_mm"] = None
         try:

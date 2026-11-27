@@ -364,7 +364,7 @@ async function pollSensors() {
 let DM = null, dmDrag = null, dmRect = null;
 const dmCv = () => $("#desk-canvas");
 function dmGeom(m) {
-  const W = dmCv().width, ext = Math.max(m.w, m.h) * m.cell, s = W / ext;
+  const W = dmCv().width, ext = Math.max(m.w, m.h, 60) * m.cell, s = W / ext;  // at least 1.2 m across
   // screen x = desk y flipped (his left is your right), screen y = desk x (away from the dock = toward you)
   const ox = (W - m.h * m.cell * s) / 2, oy = (W - m.w * m.cell * s) / 2;
   const toS = (x, y) => [ox + (m.y0 + m.h * m.cell - y) * s, oy + (x - m.x0) * s];

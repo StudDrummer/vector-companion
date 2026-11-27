@@ -118,7 +118,8 @@ svg{fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-l
 .drive{display:grid;grid-template-columns:1fr 290px;gap:18px;align-items:start}
 .cam{position:relative;aspect-ratio:16/9;background:#000;border-radius:16px;overflow:hidden}
 .cam img{width:100%;height:100%;object-fit:cover;display:block}
-.cam-msg{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#8e8e93;pointer-events:none}
+.cam-msg{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#8e8e93;pointer-events:none;text-align:center;padding:0 24px}
+.map-card .cam-msg{inset:auto 0 44px 0}
 .cam-hud{position:absolute;top:12px;left:14px;right:14px;display:flex;justify-content:space-between;color:#fff;font-size:11px;font-weight:600;letter-spacing:.06em;text-shadow:0 1px 3px rgba(0,0,0,.6)}
 .rec{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--red);margin-right:6px;animation:blink 1.4s infinite}
 @keyframes blink{50%{opacity:.25}}

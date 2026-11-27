@@ -808,6 +808,24 @@ def fan(m: Map, d: Driver, centre, bearings, deadline, max_ray=1500):
     return rays
 
 
+def prep_dock(r, call, log=print):
+    """He can't back onto the charger holding the cube or with his arms up: put it down, arms down,
+    head level (he finds the charger by its marker)."""
+    from anki_vector.util import degrees
+    try:
+        if getattr(r.status, "is_carrying_block", False):
+            log("deskmap: putting the cube down before docking")
+            call(lambda: r.behavior.place_object_on_ground_here(num_retries=1), 30, "place_object_on_ground_here")
+    except Exception as e:  # noqa: BLE001
+        log(f"deskmap: couldn't put the cube down ({e.__class__.__name__})")
+    for fn, name in ((lambda: r.behavior.set_lift_height(0.0), "set_lift_height"),
+                     (lambda: r.behavior.set_head_angle(degrees(0)), "set_head_angle")):
+        try:
+            call(fn, 8, name)
+        except Exception:  # noqa: BLE001
+            pass
+
+
 def go_home(m: Map, d: Driver, r, call, log=print) -> bool:
     """Back to a spot in front of the dock, facing it, then let him reverse on. Re-anchors the map."""
     try:
@@ -822,6 +840,7 @@ def go_home(m: Map, d: Driver, r, call, log=print) -> bool:
     except Exception as e:  # noqa: BLE001
         log(f"deskmap: couldn't line up with the dock ({e})")
     before = m.where(r)
+    prep_dock(r, call, log)
     try:
         call(lambda: r.behavior.drive_on_charger(), 120, "drive_on_charger")
     except Exception as e:  # noqa: BLE001

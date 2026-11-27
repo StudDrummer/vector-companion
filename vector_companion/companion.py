@@ -1129,6 +1129,7 @@ class Companion:
                     d = deskmap.Driver(m, r, self.call, threading.Event(), log, self.has_control, regain)
                     deskmap.go_home(m, d, r, self.call, log)
                 else:
+                    deskmap.prep_dock(r, self.call, log)
                     self.call(lambda: r.behavior.drive_on_charger(), 120, "drive_on_charger")
         except Exception as e:  # noqa: BLE001
             log(f"couldn't drive back to the charger ({e})")

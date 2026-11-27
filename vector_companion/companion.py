@@ -1102,7 +1102,7 @@ class Companion:
             with self.control(wait=5) as r:
                 self.call(lambda: r.behavior.drive_on_charger(), 60, "drive_on_charger")
         except Exception as e:  # noqa: BLE001
-            log(f"dock lock: couldn't drive back ({e})")
+            log(f"couldn't drive back to the charger ({e})")
         finally:
             self.returning = False
 
@@ -1886,7 +1886,8 @@ class Handler(BaseHTTPRequestHandler):
                         else:
                             COMP.ctl_last = 0.0  # hand him back to himself
                             with COMP.control(wait=5) as r:
-                                play_trigger(r, COMP.find_trigger("GreetAfterLongTime", "OnboardingReactToFaceHappy") or "CelebrateSuccess")
+                                trig = COMP.find_trigger("GreetAfterLongTime", "OnboardingReactToFaceHappy") or "CelebrateSuccess"
+                                COMP.call(lambda: play_trigger(r, trig), 8, "greet")  # never hang the switch on it
                             COMP.release_now()
                     except Exception as e:  # noqa: BLE001
                         log(f"mode switch effect skipped: {e}")

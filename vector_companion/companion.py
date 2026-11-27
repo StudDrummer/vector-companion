@@ -786,10 +786,10 @@ class Companion:
         finally:
             self.move_busy[part] = False
 
-    def capture(self) -> bytes:
+    def capture(self, high: bool = True) -> bytes:
         r = self.robot
         try:
-            img = r.camera.capture_single_image(enable_high_resolution=True)
+            img = r.camera.capture_single_image(enable_high_resolution=high)
         except TypeError:
             img = r.camera.capture_single_image()
         buf = io.BytesIO()
@@ -1759,7 +1759,8 @@ class Handler(BaseHTTPRequestHandler):
                 png = png or _no_map_png()
                 return self._send(200, png, "image/png")
             if u.path == "/capture":
-                return self._send(200, COMP.capture(), "image/jpeg")
+                high = urllib.parse.parse_qs(u.query).get("low") is None
+                return self._send(200, COMP.call(lambda: COMP.capture(high), 15 if high else 8, "capture"), "image/jpeg")
             if u.path == "/anims":
                 lock = safety()["dock_lock"]
                 return self._send(200, [t for t in COMP.triggers if not (lock and any(w in t for w in DRIVING_ANIMS))])

@@ -518,10 +518,11 @@ def _ollama_base() -> str:
 KEEP_ALIVE = os.environ.get("OLLAMA_KEEP_ALIVE", "2h")  # keep the model in memory between questions
 
 
-def _stream_ollama(messages, think: bool = False, max_tokens: int = 350, model: str | None = None):
+def _stream_ollama(messages, think: bool = False, max_tokens: int = 350, model: str | None = None,
+                   temperature: float = 0.7):
     """Ollama's native chat API: lets us switch 'thinking' off (fast, and the whole budget goes to the answer)."""
     body = {"model": model or _model(), "messages": messages, "stream": True, "keep_alive": KEEP_ALIVE,
-            "think": think, "options": {"num_predict": max_tokens, "temperature": 0.7}}
+            "think": think, "options": {"num_predict": max_tokens, "temperature": temperature}}
     url = _ollama_base() + "/api/chat"
     for attempt in (1, 2):
         req = urllib.request.Request(url, data=json.dumps(body).encode(), headers={"Content-Type": "application/json"})

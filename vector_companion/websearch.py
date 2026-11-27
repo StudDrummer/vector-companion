@@ -201,6 +201,64 @@ def gather(text: str) -> tuple[str, list[dict], date, str | None]:
     return q, res, day, hol, facts
 
 
+TIME = r"(\d{1,2}(?::\d{2})?\s?(?:a\.?m\.?|p\.?m\.?)|noon|midnight)"
+RANGE = re.compile(TIME + r"\s?(?:-|–|—|to|until)\s?" + TIME, re.I)
+DAYS = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
+DAY_RX = r"(mon|tue|tues|wed|thu|thur|thurs|fri|sat|sun)[a-z]*\.?"
+
+
+def _speak_time(t: str) -> str:
+    t = t.lower().replace(".", "").replace(" ", "")
+    m = re.match(r"(\d{1,2})(?::(\d{2}))?(am|pm)", t)
+    if not m:
+        return t
+    h, mi, ap = m.groups()
+    return f"{int(h)}{':' + mi if mi and mi != '00' else ''} {ap.upper()}"
+
+
+def _hours_for(day: date, pages: list[tuple[str, str]]) -> tuple[str, str] | None:
+    """Regular hours for that weekday from page text: 'Friday 6:00 am - 8:00 pm', 'Mon - Fri: 5am - 9pm'."""
+    wd = day.weekday()
+    for text, site in pages:
+        for m in re.finditer(DAY_RX + r"(?:\s?(?:-|–|to|through|thru)\s?" + DAY_RX + r")?[:\s]{0,4}" + RANGE.pattern, text, re.I):
+            a = [i for i, d in enumerate(DAYS) if d.startswith(m.group(1).lower()[:3])]
+            b = [i for i, d in enumerate(DAYS) if m.group(2) and d.startswith(m.group(2).lower()[:3])]
+            if not a:
+                continue
+            lo, hi = a[0], (b[0] if b else a[0])
+            if (lo <= wd <= hi) if lo <= hi else (wd >= lo or wd <= hi):
+                return f"{_speak_time(m.group(3))} to {_speak_time(m.group(4))}", site
+    return None
+
+
+def direct(text: str, day: date, hol: str | None, facts: list[str], res: list[dict]) -> str | None:
+    """When the pages say it plainly, answer without the model (exact, instant)."""
+    if not re.search(r"\b(hours|timings?|open|close|closing)\b", text, re.I):
+        return None
+    when = "tomorrow" if day == date.today() + timedelta(days=1) else ("today" if day == date.today() else day.strftime("on %A"))
+    place = re.sub(r"(?i)^.*?\b(?:of|for|does|is|at)\s+", "", re.sub(r"[?.!]", "", text)).strip()
+    place = re.sub(r"(?i)\b(tomorrow|today|tonight|open|close|closing|hours|timings?|on \w+day)\b", "", place).strip() or "it"
+    for f in facts:
+        site = re.search(r"\(([^)]+)\)$", f)
+        site = site.group(1).replace("www.", "") if site else "their website"
+        if re.search(r"\bclosed\b", f, re.I):
+            return f"{place[:1].upper() + place[1:]} is closed {when}, per {site}."
+        r = RANGE.search(f)
+        if r:
+            return f"{when.capitalize()}, {hol + ', ' if hol else ''}{place} is open {_speak_time(r.group(1))} to {_speak_time(r.group(2))}, per {site}."
+        if re.search(r"regular hours", f, re.I):
+            reg = _hours_for(day, [(r_.get("page", "") + " " + r_.get("snippet", ""), urllib.parse.urlparse(r_["url"]).netloc.replace("www.", ""))
+                                   for r_ in res])
+            if reg:
+                return f"Regular hours {when}: {reg[0]}, per {reg[1]}."
+    if not hol:
+        reg = _hours_for(day, [(r_.get("page", "") + " " + r_.get("snippet", ""), urllib.parse.urlparse(r_["url"]).netloc.replace("www.", ""))
+                               for r_ in res[:3]])
+        if reg:
+            return f"{place[:1].upper() + place[1:]} is open {reg[0]} {when}, per {reg[1]}."
+    return None
+
+
 def answer(text: str, history=None):
     """Yield the spoken answer (one or two sentences)."""
     from . import brain
@@ -208,6 +266,10 @@ def answer(text: str, history=None):
     q, res, day, hol, facts = gather(text)
     if not res:
         yield ("I couldn't reach the web just now, sir." if jarvis else "I couldn't reach the web just now.")
+        return
+    quick = direct(text, day, hol, facts, res)
+    if quick:
+        yield quick
         return
     today = date.today()
     when = day.strftime("%A, %B %-d, %Y") + (f" ({hol})" if hol else "")
@@ -226,7 +288,9 @@ def answer(text: str, history=None):
         + ("Address him as sir at most once." if jarvis else "") + "\n\nSEARCH RESULTS:\n" + src)
     msgs = [{"role": "system", "content": sys_prompt}, {"role": "user", "content": text}]
     buf, said = "", 0
-    for chunk in brain.stream_llm(msgs):
+    gen = (brain._stream_ollama(msgs, max_tokens=120, temperature=0.1) if brain.BACKEND == "ollama"
+           else brain.stream_llm(msgs))
+    for chunk in gen:
         buf += chunk
         m = re.search(r"^(.{12,}?[.!?])(\s+)", buf, re.S)
         if m:

@@ -149,13 +149,20 @@ TIMEISH = re.compile(r"\b(\d{1,2}(:\d{2})?\s?(am|pm|a\.m\.|p\.m\.)|noon|midnight
                      r"thanksgiving|christmas|\$\d|price|score)\b", re.I)
 
 
-def _page_text(url: str, words: list[str], limit: int = 1600) -> str:
+def _page_text(url: str, words: list[str], limit: int = 900, day: date | None = None) -> tuple[str, list[str]]:
     try:
         raw = _get(url, timeout=3.0)
     except Exception:  # noqa: BLE001
-        return ""
+        return "", []
     raw = re.sub(r"(?is)<(script|style|noscript|svg|nav|footer)[^>]*>.*?</\1>", " ", raw)
-    text = _clean(raw)
+    raw = re.sub(r"(?i)<(li|br|p|tr|h\d|div)\b", "\n<\\1", raw)
+    lines = [_clean(x) for x in raw.split("\n")]
+    text = " ".join(x for x in lines if x)
+    # lines that name the exact day asked about ("Day After Thanksgiving: November 27, 2026 | Regular hours")
+    dated = []
+    if day:
+        pat = re.compile(rf"\b({day:%B}|{day:%b})\.? {day.day}\b", re.I)
+        dated = [x[:200] for x in lines if pat.search(x) and len(x) < 220][:3]
     # keep the parts that look like the answer: sentences with the question's words, times, days, prices
     bits = re.split(r"(?<=[.!?])\s+|\s{2,}|\s\|\s", text)
     scored = []
@@ -165,9 +172,9 @@ def _page_text(url: str, words: list[str], limit: int = 1600) -> str:
         s = len(TIMEISH.findall(b)) * 2 + sum(w in b.lower() for w in words)
         if s >= 2:
             scored.append((s, i, b[:300]))
-    keep = sorted(sorted(scored, reverse=True)[:14], key=lambda t: t[1])
+    keep = sorted(sorted(scored, reverse=True)[:10], key=lambda t: t[1])
     out = " / ".join(b for _, _, b in keep)
-    return out[:limit]
+    return out[:limit], dated
 
 
 def gather(text: str) -> tuple[str, list[dict], date, str | None]:
@@ -175,28 +182,43 @@ def gather(text: str) -> tuple[str, list[dict], date, str | None]:
     t0 = time.time()
     res = search(q)
     words = [w for w in re.findall(r"[a-z]{4,}", q.lower()) if w not in ("hours", "what", "when", "does", "open")]
-    pages = list(POOL.map(lambda r: _page_text(r["url"], words), res[:3]))
-    for r, p in zip(res, pages + [""] * len(res)):
+    pages = list(POOL.map(lambda r: _page_text(r["url"], words, day=day), res[:3]))
+    facts = []
+    for r, (p, dated) in zip(res, pages):
         r["page"] = p
-    log(f"web: '{q}' -> {len(res)} results in {time.time() - t0:.1f}s")
-    return q, res, day, hol
+        facts += [f"{d} ({urllib.parse.urlparse(r['url']).netloc})" for d in dated]
+    # a holiday list that says "Regular hours" for that day: look up the regular hours for that weekday too
+    if hol and any(re.search(r"regular hours", f, re.I) for f in facts):
+        place = re.sub(r"\b(holiday hours.*|what are the|what'?s the|hours of|hours|timings?|of the|the)\b", " ", q, flags=re.I)
+        place = re.sub(r"\b%s\b" % re.escape(day.strftime("%B %-d %Y")), " ", place)
+        reg = search(re.sub(r"\s+", " ", place).strip() + " hours " + day.strftime("%A"), n=4)
+        for r in reg[:2]:
+            p, _ = _page_text(r["url"], words + [day.strftime("%A").lower()[:3]], limit=600)
+            r["page"] = p
+        res = res[:3] + reg[:3]
+        facts.append(f"That day has regular hours, so use the regular {day:%A} hours from the results.")
+    log(f"web: '{q}' -> {len(res)} results in {time.time() - t0:.1f}s; facts: {facts[:2]}")
+    return q, res, day, hol, facts
 
 
 def answer(text: str, history=None):
     """Yield the spoken answer (one or two sentences)."""
     from . import brain
     jarvis = brain._style() == "jarvis"
-    q, res, day, hol = gather(text)
+    q, res, day, hol, facts = gather(text)
     if not res:
         yield ("I couldn't reach the web just now, sir." if jarvis else "I couldn't reach the web just now.")
         return
     today = date.today()
     when = day.strftime("%A, %B %-d, %Y") + (f" ({hol})" if hol else "")
     src = "\n\n".join(f"[{i + 1}] {r['title']} ({urllib.parse.urlparse(r['url']).netloc})\n{r['snippet']}\n{r.get('page', '')}"
-                      for i, r in enumerate(res[:5]))
+                      for i, r in enumerate(res[:6]))
+    if facts:
+        src = f"LINES ABOUT {day:%B %-d} EXACTLY (most reliable):\n- " + "\n- ".join(facts) + "\n\n" + src
     sys_prompt = (
         f"Today is {today:%A, %B %-d, %Y} ({datetime.now():%-I:%M %p}). The question is about {when}.\n"
-        "Answer ONLY from the search results below. Rules: one or two short spoken sentences; the answer first; "
+        f"Answer ONLY from the search results below, about {day:%A %B %-d} specifically (not other dates in the "
+        "results, which may be other holidays or other years). Rules: one or two short spoken sentences; the answer first; "
         "no greeting, no filler, no offers to do anything else, no restating the question. "
         "If the day is a holiday and the results only show regular hours, say the regular hours and that holiday hours "
         "may differ. If the results don't contain the answer, say you couldn't confirm it and name the website to check. "

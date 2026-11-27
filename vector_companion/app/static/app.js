@@ -454,7 +454,7 @@ $("#dm-roam").onclick = () => intent("roam", "Roaming the mapped desk");
 $("#dm-stop").onclick = () => intent("stop_moving", "Stopping");
 $("#dm-clear").onclick = async () => { await tryApi("/api/deskmap", { op: "clear", keep_zones: true }, "Map cleared (your marks are kept)"); refreshMap(); };
 $("#dm-fence").addEventListener("change", e => tryApi("/api/settings", { app: { safety: { desk_fence: e.target.checked } } }, e.target.checked ? "Desk fence on" : "Desk fence off"));
-async function loadFence() { try { const s = await api("/api/settings"); $("#dm-fence").checked = (s.app.safety || {}).desk_fence !== false; } catch { } }
+async function loadFence(n = 0) { try { const s = await api("/api/settings"); $("#dm-fence").checked = (s.app.safety || {}).desk_fence !== false; } catch { if (n < 3) setTimeout(() => loadFence(n + 1), 1500); } }
 function enterDrive() { startCam(); loadSafety(); loadFence(); pollSensors(); refreshMap(); sensorT = setInterval(pollSensors, 1000); mapT = setInterval(refreshMap, 1500); }
 function leaveDrive() { stopDrive(); clearInterval(sensorT); clearInterval(mapT); }
 

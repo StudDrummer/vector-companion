@@ -94,6 +94,7 @@ VECTOR_COMMANDS = [
     (r"\bblack ?jack\b|play (a )?(card )?game|play cards|deal me in", "blackjack"),
     (r"^(hit|hit me|another( card)?|one more( card)?)$", "bj_hit"),
     (r"^(stand|i'?ll stand|stay|i'?m good|hold)$", "bj_stand"),
+    (r"^(stop|freeze|halt)( it| there| right there| now)?$|\bstop (moving|driving|roaming|exploring|scanning|wandering)\b", "stop_moving"),
     (r"^(stop|quit|end|i'?m done|no more)( the| this)?( game| playing| blackjack)?$|stop playing|quit the game", "bj_quit"),
     (r"what'?s my (card|cards|hand|score|total)|what (do|did) i (have|get)|what are my cards", "bj_status"),
     (r"\bfist ?bump", "fist_bump"),
@@ -117,8 +118,40 @@ VECTOR_COMMANDS = [
     (r"\b(fetch|bring me) (your |the )?cube", "fetch_cube"),
     (r"\broll (your |the )?cube", "roll_cube"),
     (r"\bwheelie\b", "pop_a_wheelie"),
+    (r"\b(scan|map|learn) (the |my |your )?(desk|table)\b|\bdesk scan\b", "desk_scan"),
+    (r"\b(roam|wander)( around)?\b|\bgo (for a )?(drive|wander|roam)\b|\bdrive around\b", "roam"),
     (r"\bexplore\b", "explore"),
 ]
+
+DESK_OFF = re.compile(r"\b(?:took|take|moved|move) (?:my |the )?([a-z ]{3,25}?) off (?:the |my )?desk\b"
+                      r"|\b(?:my |the )?([a-z ]{3,25}?) is (?:off|not on|gone from) (?:the |my )?desk\b")
+DESK_ON = re.compile(r"\b(?:put|placed) (?:my |the )?([a-z ]{3,25}?) back(?: on (?:the |my )?desk)?\b"
+                     r"|\b(?:my |the )?([a-z ]{3,25}?) is back(?: on (?:the |my )?desk)?\b")
+
+
+def desk_item(text: str) -> str | None:
+    """'I took my laptop off the desk' / 'the laptop is back': turns that 'sometimes there' zone off or on."""
+    t = re.sub(r"[^a-z' ]", "", text.lower())
+    m, present = DESK_OFF.search(t), False
+    if not m:
+        m, present = DESK_ON.search(t), True
+    if not m:
+        return None
+    name = (m.group(1) or m.group(2) or "").strip()
+    name = re.sub(r"^(i |i've |just )+", "", name).strip()
+    from .companion_client import call
+    try:
+        n = call("/deskmap", {"op": "present_name", "name": name, "present": present}, timeout=10).get("changed", 0)
+    except Exception:  # noqa: BLE001
+        return None
+    jarvis = S.load().get("persona", {}).get("style") == "jarvis"
+    if not n:
+        return (f"I don't have a {name} on the desk map, sir. You can add it on the Drive page." if jarvis
+                else f"I don't have a {name} on my map. Add it in the app!")
+    if present:
+        return f"Noted, sir. I'll steer clear of the {name}." if jarvis else f"Got it, I'll avoid the {name}."
+    return f"Noted, sir. That space is free again." if jarvis else f"Okay, more room for me!"
+
 
 
 def vector_command(text: str) -> str | None:
@@ -156,6 +189,9 @@ def respond(text: str, history: list[dict] | None = None) -> str:
         q = None
     if q is not None:
         return q
+    said = desk_item(text)
+    if said is not None:
+        return said
     action = vector_command(text)
     if action:
         return run_vector_command(action)
@@ -204,6 +240,10 @@ def respond_stream(text: str, history: list[dict] | None = None):
         q = None
     if q is not None:
         yield q
+        return
+    said = desk_item(text)
+    if said is not None:
+        yield said
         return
     action = vector_command(text)
     if action:

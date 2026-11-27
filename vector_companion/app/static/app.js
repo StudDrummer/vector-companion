@@ -360,13 +360,102 @@ async function pollSensors() {
     if (s.safety_event && Date.now() / 1000 - s.safety_event.at < 3) toast("Stopped: " + s.safety_event.why, true);
   } catch { $("#sn-charger").textContent = $("#sn-cliff").textContent = $("#sn-dist").textContent = "offline"; }
 }
-function refreshMap() {
-  const img = $("#desk-map"); const n = new Image();
-  n.onload = () => { img.src = n.src; $("#map-msg").style.display = "none"; };
-  n.onerror = () => { $("#map-msg").style.display = "flex"; $("#map-msg").textContent = "Map unavailable while Vector is offline."; };
-  n.src = "/api/map.png?t=" + Date.now();
+/* desk map: drawn as you see the desk sitting in front of it (charger at the top) */
+let DM = null, dmDrag = null, dmRect = null;
+const dmCv = () => $("#desk-canvas");
+function dmGeom(m) {
+  const W = dmCv().width, ext = Math.max(m.w, m.h) * m.cell, s = W / ext;
+  // screen x = desk y flipped (his left is your right), screen y = desk x (away from the dock = toward you)
+  const ox = (W - m.h * m.cell * s) / 2, oy = (W - m.w * m.cell * s) / 2;
+  const toS = (x, y) => [ox + (m.y0 + m.h * m.cell - y) * s, oy + (x - m.x0) * s];
+  const toD = (px, py) => [m.x0 + (py - oy) / s, m.y0 + m.h * m.cell - (px - ox) / s];
+  return { s, toS, toD };
 }
-function enterDrive() { startCam(); loadSafety(); pollSensors(); refreshMap(); sensorT = setInterval(pollSensors, 1000); mapT = setInterval(refreshMap, 3000); }
+function drawDesk() {
+  const m = DM, cv = dmCv(), g = cv.getContext("2d");
+  g.fillStyle = "#121214"; g.fillRect(0, 0, cv.width, cv.height);
+  if (!m) return;
+  const { s, toS } = dmGeom(m), cs = m.cell * s + 0.6;
+  const raw = atob(m.cells), col = ["", "#2f5a3c", "#ff453a", "#ff9f0a"];
+  for (let j = 0; j < m.h; j++) for (let i = 0; i < m.w; i++) {
+    const v = raw.charCodeAt(j * m.w + i); if (!v) continue;
+    const [px, py] = toS(m.x0 + i * m.cell, m.y0 + (j + 1) * m.cell);
+    g.fillStyle = col[v]; g.fillRect(px, py, cs, cs);
+  }
+  const rect = (x0, y0, x1, y1, fill, stroke, dash) => {
+    const [a, b] = toS(Math.min(x0, x1), Math.max(y0, y1)), [c, d] = toS(Math.max(x0, x1), Math.min(y0, y1));
+    g.setLineDash(dash || []); g.fillStyle = fill; g.fillRect(a, b, c - a, d - b);
+    g.strokeStyle = stroke; g.lineWidth = 2; g.strokeRect(a, b, c - a, d - b); g.setLineDash([]);
+    return [a, b];
+  };
+  const [dx0, dy0, dx1, dy1] = m.dock; rect(dx0, dy0, dx1, dy1, "rgba(10,132,255,.25)", "#0a84ff");
+  g.font = "600 22px -apple-system, sans-serif";
+  for (const z of m.zones) {
+    const on = z.kind === "keepout" || z.present;
+    const [a, b] = rect(z.x0, z.y0, z.x1, z.y1, on ? "rgba(191,90,242,.22)" : "rgba(142,142,147,.08)",
+      on ? "#bf5af2" : "#636366", z.kind === "sometimes" ? [8, 6] : null);
+    g.fillStyle = on ? "#e5c7fb" : "#8e8e93"; g.fillText(z.name, a + 6, b + 24);
+  }
+  if (dmRect) rect(dmRect[0], dmRect[1], dmRect[2], dmRect[3], "rgba(10,132,255,.18)", "#0a84ff", [6, 4]);
+  if (m.pose) {
+    const [x, y, deg] = m.pose, [px, py] = toS(x, y), a = deg * Math.PI / 180;
+    g.fillStyle = "#2fd6c9"; g.beginPath(); g.arc(px, py, Math.max(7, 30 * s), 0, 7); g.fill();
+    g.strokeStyle = "#2fd6c9"; g.lineWidth = 4; g.beginPath(); g.moveTo(px, py);
+    g.lineTo(px - Math.sin(a) * 70 * s, py + Math.cos(a) * 70 * s); g.stroke();
+  }
+  const bar = 100 * s; g.fillStyle = g.strokeStyle = "#c8c8cd"; g.lineWidth = 3;
+  g.beginPath(); g.moveTo(16, cv.height - 22); g.lineTo(16 + bar, cv.height - 22); g.stroke();
+  g.font = "20px -apple-system, sans-serif"; g.fillText("10 cm", 24 + bar, cv.height - 14);
+}
+function dmZones() {
+  const box = $("#dm-zones"), zs = (DM && DM.zones) || [];
+  box.style.display = zs.length ? "" : "none";
+  box.innerHTML = zs.map(z => `<div class="row"><div class="rl">${esc(z.name)}<small>${z.kind === "keepout" ? "Always there: he never goes here" : (z.present ? "On the desk now: avoided" : "Off the desk now: free space")}</small></div><div class="rr">${z.kind === "sometimes" ? `<label class="sw"><input type="checkbox" data-zp="${z.id}" ${z.present ? "checked" : ""}><span></span></label>` : ""} <button class="btn small danger" data-zd="${z.id}">Remove</button></div></div>`).join("");
+  box.querySelectorAll("[data-zd]").forEach(b => b.onclick = async () => { await tryApi("/api/deskmap", { op: "zone_delete", id: b.dataset.zd }, "Removed"); refreshMap(); });
+  box.querySelectorAll("[data-zp]").forEach(c => c.onchange = async () => { await tryApi("/api/deskmap", { op: "present", id: c.dataset.zp, present: c.checked }, c.checked ? "He'll avoid it" : "Space freed up"); refreshMap(); });
+}
+let dmKey = "";
+async function refreshMap() {
+  let m;
+  try { m = await api("/api/deskmap"); } catch { $("#dm-status").textContent = "offline"; return; }
+  DM = m;
+  const p = m.progress;
+  $("#dm-status").innerHTML = p ? `<span class="warn">${p.what === "scanning" ? "Scanning" : "Roaming"}: ${esc(p.step)}</span>`
+    : !m.scanned_at ? "Not scanned yet" : m.anchored ? '<span class="ok">Knows where he is</span>' : '<span class="warn">Lost: put him on his charger</span>';
+  $("#dm-area").textContent = m.scanned_at || m.area_m2 ? `${m.area_m2} m² of floor, ${m.obstacles} obstacle${m.obstacles === 1 ? "" : "s"}` : "--";
+  $("#map-msg").style.display = (m.area_m2 || m.zones.length || p) ? "none" : "flex";
+  $("#dm-scan").textContent = m.scanned_at ? "Scan again" : "Scan desk";
+  const k = JSON.stringify(m.zones); if (k !== dmKey) { dmKey = k; dmZones(); }
+  drawDesk();
+}
+function dmPoint(e) {
+  const cv = dmCv(), r = cv.getBoundingClientRect();
+  return dmGeom(DM).toD((e.clientX - r.left) * cv.width / r.width, (e.clientY - r.top) * cv.height / r.height);
+}
+dmCv().addEventListener("mousedown", e => { if (!DM) return; dmDrag = dmPoint(e); dmRect = [...dmDrag, ...dmDrag]; });
+window.addEventListener("mousemove", e => { if (!dmDrag) return; const p = dmPoint(e); dmRect = [dmDrag[0], dmDrag[1], p[0], p[1]]; drawDesk(); });
+window.addEventListener("mouseup", () => {
+  if (!dmDrag) return; dmDrag = null;
+  if (Math.abs(dmRect[2] - dmRect[0]) < 30 || Math.abs(dmRect[3] - dmRect[1]) < 30) { dmRect = null; drawDesk(); return; }
+  $("#dm-new").classList.add("on"); $("#dm-name").focus();
+});
+let dmKind = "keepout";
+document.querySelectorAll("#dm-kind button").forEach(b => b.onclick = () => {
+  document.querySelectorAll("#dm-kind button").forEach(x => x.classList.toggle("on", x === b)); dmKind = b.dataset.v;
+});
+$("#dm-cancel").onclick = () => { dmRect = null; $("#dm-new").classList.remove("on"); drawDesk(); };
+$("#dm-save").onclick = async () => {
+  const [x0, y0, x1, y1] = dmRect, name = $("#dm-name").value.trim() || (dmKind === "sometimes" ? "Laptop" : "Keep out");
+  await tryApi("/api/deskmap", { op: "zone", zone: { name, kind: dmKind, present: true, x0, y0, x1, y1 } }, `Added ${name}`);
+  dmRect = null; $("#dm-name").value = ""; $("#dm-new").classList.remove("on"); refreshMap();
+};
+$("#dm-scan").onclick = () => intent("desk_scan", "Scanning: stay nearby; he starts and ends on his charger");
+$("#dm-roam").onclick = () => intent("roam", "Roaming the mapped desk");
+$("#dm-stop").onclick = () => intent("stop_moving", "Stopping");
+$("#dm-clear").onclick = async () => { await tryApi("/api/deskmap", { op: "clear", keep_zones: true }, "Map cleared (your marks are kept)"); refreshMap(); };
+$("#dm-fence").addEventListener("change", e => tryApi("/api/settings", { app: { safety: { desk_fence: e.target.checked } } }, e.target.checked ? "Desk fence on" : "Desk fence off"));
+async function loadFence() { try { const s = await api("/api/settings"); $("#dm-fence").checked = (s.app.safety || {}).desk_fence !== false; } catch { } }
+function enterDrive() { startCam(); loadSafety(); loadFence(); pollSensors(); refreshMap(); sensorT = setInterval(pollSensors, 1000); mapT = setInterval(refreshMap, 1500); }
 function leaveDrive() { stopDrive(); clearInterval(sensorT); clearInterval(mapT); }
 
 /* ---------------- people ---------------- */

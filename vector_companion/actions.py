@@ -42,7 +42,8 @@ CATALOG = {
     "name": "What's my name", "sleep": "Go to sleep", "go_to_charger": "Go home", "take_photo": "Take a photo",
     "volume_up": "Louder", "volume_down": "Quieter", "be_quiet": "Be quiet", "status": "Status report",
 }
-DRIVES = {"dance", "explore", "come_here", "look_at_me", "fetch_cube", "roll_cube", "pop_a_wheelie"}
+DRIVES = {"dance", "explore", "come_here", "look_at_me", "fetch_cube", "roll_cube", "pop_a_wheelie",
+          "desk_scan", "roam", "stop_moving"}
 
 
 def _jarvis() -> bool:
@@ -74,6 +75,9 @@ class Actions:
     def run(self, action: str) -> dict:
         a = action.strip().lower()
         from .companion import OWNER as owner
+        if a == "stop_moving" and self.bj and self.bj.active and not getattr(getattr(self, "motion", None), "busy", None):
+            self.bj.abandon("Okay, game over.")  # a plain "stop" during blackjack ends the game
+            return {}
         if a in DRIVES or a == "go_to_charger":
             from .motion import Motion
             if not hasattr(self, "motion"):

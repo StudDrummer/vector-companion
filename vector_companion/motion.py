@@ -5,9 +5,12 @@ WirePod sends for these, which is why Fetch cube etc. used to do nothing).
   roll_cube      find the cube and roll it
   pop_a_wheelie  wheelie off the cube
   come_here      find your face and drive toward you
-  explore        drive off the dock and look around, a few short safe hops
+  explore        roam the mapped desk (asks for a desk scan first if there is no map)
   dance          a dance animation (wheels allowed)
   go_to_charger  back to the dock
+  desk_scan      map the desk (edges, obstacles, the floor in between), starting and ending on the dock
+  roam           wander the mapped desk: planned paths, never off the map, back to the dock at the end
+  stop_moving    stop whatever driving he's doing
 
 Each runs in the background and talks: "On it." / what went wrong. All are refused while the dock
 lock is on. Cliff and obstacle safety: his own firmware stops actions at cliffs; short hops only.
@@ -20,7 +23,8 @@ import time
 
 from . import settings as S
 
-ACTIONS = ("fetch_cube", "roll_cube", "pop_a_wheelie", "come_here", "explore", "dance", "go_to_charger")
+ACTIONS = ("fetch_cube", "roll_cube", "pop_a_wheelie", "come_here", "explore", "dance", "go_to_charger",
+           "desk_scan", "roam", "stop_moving")
 
 
 def _jarvis() -> bool:
@@ -52,14 +56,27 @@ class Motion:
         self.c = comp
         self.busy = None
         self.lock = threading.Lock()
+        self.cancel = threading.Event()
+
+    def stop(self) -> dict:
+        was = self.busy
+        self.cancel.set()
+        try:
+            self.c.drive_cmd = {"lw": 0.0, "rw": 0.0, "at": time.time()}
+        except Exception:  # noqa: BLE001
+            pass
+        return {"stopped": was}
 
     # ------------------------------------------------------------ entry
     def start(self, action: str) -> dict:
+        if action == "stop_moving":
+            return self.stop()
         if S.load()["safety"].get("dock_lock"):
             raise PermissionError("The dock lock is on. Turn it off (Drive & Camera or Robot Settings) to let him drive.")
         if not self.lock.acquire(blocking=False):
             raise RuntimeError(f"He's still busy with {self.busy.replace('_', ' ')}.")
         self.busy = action
+        self.cancel.clear()
         self.c.pause_still(5)  # let go of the hold so he can move; it comes back once he's docked and idle
         threading.Thread(target=self._run, args=(action,), daemon=True).start()
         return {"started": action}
@@ -67,13 +84,22 @@ class Motion:
     def _run(self, action: str):
         from .companion import log
         log(f"motion: {action}")
+        from . import deskmap
         try:
             getattr(self, action)()
+        except InterruptedError:
+            log(f"motion: {action} stopped")
+            self._say("Stopped, sir." if _jarvis() else "Okay, stopping.")
+        except deskmap.Lost:
+            log(f"motion: {action}: he was picked up")
+            self._say("I've lost my place, sir. Put me on my charger and I'll get my bearings."
+                      if _jarvis() else "Whoa! Put me back on my charger so I know where I am.")
         except Exception as e:  # noqa: BLE001
             msg = str(e) or e.__class__.__name__
             log(f"motion: {action} failed: {msg}")
             self._say(self._friendly(action, msg))
         finally:
+            deskmap.get().progress = None
             self.c.cube_handled_until = time.time() + 5
             self.c.still_paused_until = 0  # the cube settling after he lets go isn't a tap
             self.busy = None
@@ -84,6 +110,8 @@ class Motion:
         m = msg.lower()
         if "cube" in m and ("not" in m or "find" in m or "no " in m):
             return "I can't find my cube. Put it in front of me and try again."
+        if "charger" in m or "map" in m or "where i am" in m:
+            return msg
         if "slow" in m or "time" in m:
             return "That took too long, so I stopped."
         return f"I couldn't {action.replace('_', ' ')} just now."
@@ -195,29 +223,64 @@ class Motion:
             if not self._face_turn(r):
                 self._say("I can't see you. Wave at me and try again.")
                 return
-            self._call(lambda: r.behavior.drive_straight(_mm(200), _speed(80)), 25, "drive_straight")
+            from . import deskmap
+            m = deskmap.get()
+            if m.anchored(r):  # checked hops: stops for edges and anything in the way
+                d = deskmap.Driver(m, r, self._call, self.cancel)
+                for _ in range(4):
+                    if d.hop(50, speed=70) != "ok":
+                        break
+            else:
+                p = r.proximity.last_sensor_reading
+                room = (p.distance.distance_mm - 70) if (p and p.found_object) else 200
+                if room > 30:
+                    self._call(lambda: r.behavior.drive_straight(_mm(min(200, room)), _speed(80)), 25, "drive_straight")
             self._call(lambda: r.behavior.set_head_angle(_deg(35)), 10, "set_head_angle")
         self._say("Here I am, sir." if _jarvis() else "Hi!")
 
     def explore(self):
+        """Without a map he'd be driving blind, so explore = roam the mapped desk."""
+        from . import deskmap
+        if not deskmap.get().scanned:
+            self._say("I haven't mapped the desk yet, sir. Say: scan the desk." if _jarvis()
+                      else "I need to map my desk first. Say: scan the desk!")
+            return
+        self.roam()
+
+    def desk_scan(self):
+        from . import deskmap
+        from .companion import log
+        m = deskmap.get()
+        self._say("Mapping the desk, sir. Please leave everything where it is; this takes about ten minutes."
+                  if _jarvis() else "Ooh, let me explore my desk! This takes a few minutes.")
         with self.c.control():
-            r = self.c.raw  # unwrapped: these calls get their own long time limits below
-            self._say("Off I go.")
-            self._off_dock(r)
-            self._call(lambda: r.behavior.set_head_angle(_deg(0)), 10, "set_head_angle")
-            for _ in range(5):
-                self._call(lambda: r.behavior.turn_in_place(_deg(random.choice([-90, -45, 45, 90, 135]))),
-                           15, "turn_in_place")
-                p = r.proximity.last_sensor_reading
-                clear = not (p and p.found_object and p.distance.distance_mm < 150)
-                if clear and not r.status.is_cliff_detected:
-                    self._call(lambda: r.behavior.drive_straight(_mm(120), _speed(70)), 20, "drive_straight")
-                time.sleep(0.5)
-            try:
-                self._call(lambda: r.behavior.look_around_in_place(), 60, "look_around_in_place")
-            except Exception:  # noqa: BLE001
-                pass
-        self._say("Nice desk, sir." if _jarvis() else "That was fun!")
+            r = self.c.raw
+            out = deskmap.scan(m, r, self._call, self.cancel, log=log, minutes=12)
+        self.c.desk_changed()
+        n = out["obstacles"]
+        what = f"{n} thing{'s' if n != 1 else ''} to steer around" if n else "nothing in the way"
+        self._say((f"Desk mapped, sir: about {out['area_m2']:.1f} square metres of driving room and {what}. "
+                   "You can name things and mark keep-out areas in the app.") if _jarvis()
+                  else f"All mapped! I found {what}.")
+
+    def roam(self):
+        from . import deskmap
+        from .companion import log
+        m = deskmap.get()
+
+        def pause():  # a moment at each spot: look around like he's curious (Jarvis: just a glance)
+            from anki_vector.util import degrees
+            r = self.c.raw
+            self._call(lambda: r.behavior.set_head_angle(degrees(random.choice([0, 15, 30]))), 10, "set_head_angle")
+            time.sleep(1.0 if _jarvis() else 2.0)
+        if not _jarvis():
+            self._say("Exploring!")
+        with self.c.control():
+            r = self.c.raw
+            out = deskmap.roam(m, r, self._call, self.cancel, log=log, minutes=3, pause=pause)
+        log(f"motion: roam {out}")
+        if not out.get("docked"):
+            self._say("I couldn't get back on my charger, sir." if _jarvis() else "Help, I can't find my charger!")
 
     def dance(self):
         from anki_vector.messaging import protocol

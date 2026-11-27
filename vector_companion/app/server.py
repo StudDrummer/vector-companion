@@ -555,6 +555,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(mac_voices())
             if path == "/api/sensors":
                 return self._json(cc.call("/sensors", timeout=3))
+            if path == "/api/deskmap":
+                return self._json(cc.call("/deskmap", timeout=6))
             if path == "/api/map.png":
                 return self._send(200, cc.call("/map.png", timeout=8), "image/png")
             if path == "/api/companion_anims":
@@ -622,6 +624,8 @@ class Handler(BaseHTTPRequestHandler):
                 with ROBOT.lock:
                     ROBOT.release()
                 return self._json({"ok": True})
+            if path == "/api/deskmap":
+                return self._json(cc.call("/deskmap", b, timeout=15))
             if path.startswith("/api/companion/"):
                 sub = path[len("/api/companion"):]
                 if sub not in ("/face", "/head", "/lift", "/anim", "/scan", "/focus", "/greet_test", "/say",

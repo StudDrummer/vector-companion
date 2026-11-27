@@ -141,8 +141,30 @@
           <p class="foot">While driving he stops by himself at the desk edge or when something is closer than 6 cm ahead, and whenever the app loses contact.</p>
         </div>
       </div>
-      <div class="group-title">Desk map <span class="hint">what Vector has mapped: green clear, orange obstacles, red edges</span></div>
-      <div class="map-card"><img id="desk-map" alt=""><div class="cam-msg" id="map-msg">The map fills in as he looks and moves around.</div></div>
+      <div class="group-title">Desk map <span class="hint">where he's allowed to drive. Drag across the map to mark something on your desk.</span></div>
+      <div class="desk">
+        <div class="map-card"><canvas id="desk-canvas" width="720" height="720"></canvas><div class="cam-msg" id="map-msg">No desk map yet. Put him on his charger and press Scan desk.</div></div>
+        <div class="desk-side">
+          <div class="group">
+            <div class="row"><div class="rl">Status</div><div class="rr" id="dm-status">--</div></div>
+            <div class="row"><div class="rl">Mapped</div><div class="rr" id="dm-area">--</div></div>
+            <div class="row"><div class="rl">Desk fence<small>Vector mode: when he wanders by himself, he's turned away from edges, marked areas and things that are always there</small></div><div class="rr"><label class="sw"><input type="checkbox" id="dm-fence"><span></span></label></div></div>
+          </div>
+          <div class="btn-row">
+            <button class="btn primary" id="dm-scan">Scan desk</button>
+            <button class="btn" id="dm-roam">Roam</button>
+            <button class="btn danger" id="dm-stop">Stop</button>
+          </div>
+          <div class="group dm-new" id="dm-new">
+            <div class="row"><div class="rl">Name</div><div class="rr grow"><input id="dm-name" class="field" placeholder="Laptop, monitor, picture frame..."></div></div>
+            <div class="row"><div class="rl">Kind</div><div class="rr"><div class="seg" id="dm-kind"><button data-v="keepout" class="on">Always there</button><button data-v="sometimes">Sometimes there</button></div></div></div>
+            <div class="row"><div class="rr grow" style="justify-content:flex-end"><button class="btn small" id="dm-cancel">Cancel</button> <button class="btn primary small" id="dm-save">Add</button></div></div>
+          </div>
+          <div class="group" id="dm-zones"></div>
+          <p class="foot"><span class="lg fl"></span>floor he's checked <span class="lg ed"></span>desk edge <span class="lg ob"></span>obstacle <span class="lg zn"></span>marked by you <span class="lg dk"></span>charger. Roaming stays 8 cm from all of these and never goes into the unchecked dark area. Say "Jarvis, scan the desk", "roam around", "stop", or "I took my laptop off the desk".</p>
+          <div class="btn-row"><button class="btn small" id="dm-clear">Clear map</button></div>
+        </div>
+      </div>
     </section>
 
     <!-- ACTIONS -->

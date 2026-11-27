@@ -622,6 +622,12 @@ class Ears:
                           else "Microphone off, sir. Switch me back on from the menu bar when you need me.")
                 break
             if STOP_WORDS.match(text):
+                if re.match(r"\W*stop\W*$", text, re.I):  # "Jarvis, stop" also stops any driving
+                    try:
+                        from .companion_client import call
+                        call("/do", {"action": "stop_moving"}, timeout=5)
+                    except Exception:  # noqa: BLE001
+                        pass
                 if self.robot:
                     from .voice import speak
                     speak("Very good, sir." if S.load()["persona"].get("style") == "jarvis" else "Okay!")

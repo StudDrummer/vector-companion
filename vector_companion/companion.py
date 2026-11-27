@@ -921,6 +921,132 @@ class Companion:
                         pass
                 applied = (0.0, 0.0)
 
+    # ------------------------------------------------------------ desk map upkeep + desk fence
+    def desk_changed(self):
+        self.desk_objects_for = None  # re-tell his own planner where things are
+
+    def _desk_loop(self):
+        """Keeps the desk map tied to his dock, adds what he finds whenever he drives (even on his own in
+        Vector mode), and is the desk fence: if his own wandering heads at an edge, a keep-out zone or
+        something on the desk, it takes over, backs him off and turns him away."""
+        from . import deskmap
+        m = deskmap.get()
+        dock_since, last = None, None
+        last_save = last_fence = last_seen_charger = 0.0
+        self.desk_objects_for = None
+        while True:
+            time.sleep(0.2)
+            r = self._robot
+            if r is None or not self.connected:
+                last = None
+                continue
+            now = time.time()
+            try:
+                st = r.status
+                od = deskmap.Map.odom(r)
+                held = st.is_picked_up or getattr(st, "is_being_held", False)
+                mov = getattr(self.actions, "motion", None)
+                busy = bool(mov and mov.busy)
+                # 1. on the dock and still: that's the map's origin (this also undoes odometry drift)
+                if st.is_on_charger and not held and not getattr(st, "are_wheels_moving", False):
+                    dock_since = dock_since or now
+                    a = m.anchor
+                    if now - dock_since > 2 and not busy and (
+                            not a or a[0] != od[0] or math.hypot(a[1] - od[1], a[2] - od[2]) > 3):
+                        m.set_anchor(od)
+                        m.remember_charger(r)
+                        self.desk_objects_for = None
+                else:
+                    dock_since = None
+                # 2. moved by hand: find the dock again by seeing the charger
+                if not m.anchored(r) and not held and now - last_seen_charger > 1:
+                    last_seen_charger = now
+                    if m.anchor_from_charger(r):
+                        log("desk map: found my charger, back on the map")
+                        self.desk_objects_for = None
+                if not m.anchored(r) or held:
+                    last = None
+                    continue
+                # 3. his own planner should know the map too (edges, obstacles, zones)
+                key = (od[0], m.scanned_at, len(m.zones), tuple((z["id"], z.get("present")) for z in m.zones))
+                if m.scanned and self.desk_objects_for != key and not busy:
+                    self.desk_objects_for = key
+                    threading.Thread(target=self._sync_desk_objects, daemon=True).start()
+                p = m.where(r)
+                if st.is_on_charger or busy or p is None:
+                    last = p
+                    continue
+                # 4. learning: floor under him, edges, what the distance sensor sees
+                m.mark_floor(p[0], p[1])
+                if st.is_cliff_detected:
+                    m.mark_edge(*p)
+                try:
+                    pr = r.proximity.last_sensor_reading
+                    if pr is not None and not pr.is_lift_in_fov:
+                        m.mark_prox(*p, bool(pr.found_object), float(pr.distance.distance_mm))
+                except Exception:  # noqa: BLE001
+                    pass
+                # 5. the fence (Vector mode: his own driving; Jarvis mode holds him still anyway)
+                fwd = last is not None and ((p[0] - last[0]) * math.cos(p[2]) + (p[1] - last[1]) * math.sin(p[2])) > 2
+                last = p
+                if (fwd and m.scanned and safety().get("desk_fence", True) and self.reserve is None
+                        and now - last_fence > 4):
+                    why = m.danger(*p)
+                    if why:
+                        last_fence = now
+                        threading.Thread(target=self._fence_turn, args=(why,), daemon=True).start()
+            except Exception:  # noqa: BLE001
+                continue
+            finally:
+                if m.dirty and now - last_save > 60 and not (getattr(self.actions, "motion", None) and self.actions.motion.busy):
+                    last_save = now
+                    try:
+                        m.save()
+                    except Exception:  # noqa: BLE001
+                        pass
+
+    def _fence_turn(self, why: str):
+        from anki_vector.util import degrees, distance_mm, speed_mmps
+        log(f"desk fence: {why} ahead, turning him away")
+        self.safety_event = {"at": time.time(), "why": f"desk fence: {why} ahead"}
+        try:
+            with self.control(wait=3) as r:
+                r.motors.set_wheel_motors(0, 0)
+                self.call(lambda: r.behavior.drive_straight(distance_mm(-50), speed_mmps(60), should_play_anim=False),
+                          10, "drive_straight")
+                self.call(lambda: r.behavior.turn_in_place(degrees(150)), 10, "turn_in_place")
+        except Exception as e:  # noqa: BLE001
+            log(f"desk fence: couldn't turn him ({e})")
+
+    def _sync_desk_objects(self):
+        """Tell his own path planner (used by his wandering, cube pick-ups, docking) about the map, as
+        invisible boxes: keep-out zones, obstacles and the desk edges."""
+        from anki_vector.util import Pose, degrees
+        from . import deskmap
+        m = deskmap.get()
+        r = self._robot
+        if r is None or not m.anchor:
+            return
+        boxes = [(z["x0"], z["y0"], z["x1"], z["y1"]) for z in m.zones
+                 if z.get("kind") == "keepout" or z.get("present", True)]
+        boxes += m.blocks("obstacle", 25) + m.blocks("edge", 30)
+
+        def go():
+            r.world.delete_custom_objects(delete_custom_marker_objects=False, delete_fixed_custom_objects=True,
+                                          delete_custom_object_archetypes=False)
+            n = 0
+            for x0, y0, x1, y1 in boxes:
+                ox, oy, oth = m.to_odom((x0 + x1) / 2, (y0 + y1) / 2, 0.0)
+                r.world.create_custom_fixed_object(Pose(ox, oy, 0, angle_z=degrees(math.degrees(oth))),
+                                                   max(10, abs(x1 - x0)), max(10, abs(y1 - y0)), 60)
+                n += 1
+            return n
+        try:
+            n = self.call(go, 30, "desk_objects")
+            log(f"desk map: told his planner about {n} boxes")
+        except Exception as e:  # noqa: BLE001
+            log(f"desk map: couldn't add the boxes to his planner ({e.__class__.__name__})")
+
     def _watch_loop(self):
         """Dock lock: if he leaves the charger by himself, send him straight back."""
         off_since = None
@@ -1594,6 +1720,9 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, (Companion.GUARD_DIR / os.path.basename(u.path)).read_bytes(), "image/jpeg")
             if u.path == "/sensors":
                 return self._send(200, COMP.sensors())
+            if u.path == "/deskmap":
+                from . import deskmap
+                return self._send(200, deskmap.get().view(COMP._robot if COMP.connected else None))
             if u.path == "/map.png":
                 png = None
                 if time.time() - getattr(COMP, "map_failed_at", 0) > 120:  # don't ask him every 3 s when there's no map
@@ -1641,6 +1770,36 @@ class Handler(BaseHTTPRequestHandler):
                 COMP.drive(b.get("lw", 0), b.get("rw", 0))
             elif u.path == "/stop":
                 COMP.drive_cmd = {"lw": 0.0, "rw": 0.0, "at": time.time()}
+                if getattr(COMP.actions, "motion", None):
+                    COMP.actions.motion.stop()
+            elif u.path == "/deskmap":
+                from . import deskmap
+                m, op = deskmap.get(), b.get("op")
+                if op == "zone":
+                    z = m.add_zone(b.get("zone") or {})
+                    COMP.desk_changed()
+                    return self._send(200, {"ok": True, "zone": z})
+                if op == "zone_delete":
+                    m.remove_zone(str(b.get("id")))
+                elif op == "present_name":
+                    n = m.set_present(str(b.get("name", "")), bool(b.get("present")))
+                    COMP.desk_changed()
+                    return self._send(200, {"ok": True, "changed": n})
+                elif op == "present":
+                    for z in m.zones:
+                        if z["id"] == b.get("id"):
+                            z["present"] = bool(b.get("present"))
+                    m.save()
+                elif op == "clear":
+                    with m.lock:
+                        m.clear_layers()
+                        m.scanned_at = 0
+                        if not b.get("keep_zones", True):
+                            m.zones = []
+                        m.save()
+                else:
+                    return self._send(400, {"error": "unknown op"})
+                COMP.desk_changed()
             elif u.path == "/dock":
                 with COMP.control() as r:
                     r.behavior.drive_on_charger()
@@ -1821,6 +1980,7 @@ def main():
     COMP = Companion()
     COMP.reminders = Reminders(COMP)
     threading.Thread(target=COMP._jarvis_face_loop, daemon=True).start()
+    threading.Thread(target=COMP._desk_loop, daemon=True).start()
     _quiet_sdk_logs()
     threading.Timer(20, _quiet_sdk_logs).start()  # again once the SDK has connected and added its loggers
     COMP.resume_focus()

@@ -141,7 +141,7 @@
           <p class="foot">While driving he stops by himself at the desk edge or when something is closer than 6 cm ahead, and whenever the app loses contact.</p>
         </div>
       </div>
-      <div class="group-title">Desk map <span class="hint">where he's allowed to drive. Drag across the map to mark something on your desk.</span></div>
+      <div class="group-title">Desk map <span class="hint">drag across the map to mark an area. Most reliable: draw the open part of your desk as "Safe to drive" (like a robot vacuum's map editor): he then only ever drives inside it.</span></div>
       <div class="desk">
         <div class="map-card"><canvas id="desk-canvas" width="720" height="720"></canvas><div class="cam-msg" id="map-msg">No desk map yet. Put him on his charger and press Scan desk.</div></div>
         <div class="desk-side">
@@ -157,7 +157,7 @@
           </div>
           <div class="group dm-new" id="dm-new">
             <div class="row"><div class="rl">Name</div><div class="rr grow"><input id="dm-name" class="field" placeholder="Laptop, monitor, picture frame..."></div></div>
-            <div class="row"><div class="rl">Kind</div><div class="rr"><div class="seg" id="dm-kind"><button data-v="keepout" class="on">Always there</button><button data-v="sometimes">Sometimes there</button></div></div></div>
+            <div class="row"><div class="rl">Kind</div><div class="rr"><div class="seg" id="dm-kind"><button data-v="floor">Safe to drive</button><button data-v="keepout" class="on">Always there</button><button data-v="sometimes">Sometimes there</button></div></div></div>
             <div class="row"><div class="rr grow" style="justify-content:flex-end"><button class="btn small" id="dm-cancel">Cancel</button> <button class="btn primary small" id="dm-save">Add</button></div></div>
           </div>
           <div class="group" id="dm-zones"></div>

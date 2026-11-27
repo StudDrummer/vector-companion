@@ -95,7 +95,19 @@ class Map:
 
     @property
     def scanned(self) -> bool:
-        return self.scanned_at > 0
+        return self.scanned_at > 0 or bool(self.safe_cells())
+
+    def safe_cells(self):
+        """Areas you drew as 'safe to drive' (like a robot vacuum's map editing): checked by you, so they
+        count as floor, and when any exist he roams only inside them."""
+        out = set()
+        for z in self.zones:
+            if z.get("kind") != "floor":
+                continue
+            lo, hi = self.cell(min(z["x0"], z["x1"]), min(z["y0"], z["y1"])), self.cell(max(z["x0"], z["x1"]), max(z["y0"], z["y1"]))
+            if lo and hi:
+                out |= {(i, j) for i in range(lo[0], hi[0] + 1) for j in range(lo[1], hi[1] + 1)}
+        return out
 
     # ------------------------------------------------------------ frames
     @staticmethod
@@ -273,6 +285,7 @@ class Map:
         out = set()
         rects = [DOCK_ZONE] + [(z["x0"], z["y0"], z["x1"], z["y1"]) for z in self.zones
                                if z.get("kind") == "keepout" or (z.get("kind") == "sometimes" and z.get("present", True))]
+        # (kind "floor" = safe to drive: see safe_cells)
         for x0, y0, x1, y1 in rects:
             lo, hi = self.cell(min(x0, x1), min(y0, y1)), self.cell(max(x0, x1), max(y0, y1))
             if lo and hi:
@@ -284,7 +297,7 @@ class Map:
     def add_zone(self, z: dict) -> dict:
         with self.lock:
             z = {"id": z.get("id") or f"z{int(time.time() * 1000) % 10**9}", "name": str(z.get("name", "Zone"))[:40],
-                 "kind": "sometimes" if z.get("kind") == "sometimes" else "keepout", "present": bool(z.get("present", True)),
+                 "kind": z.get("kind") if z.get("kind") in ("sometimes", "floor") else "keepout", "present": bool(z.get("present", True)),
                  **{k: float(z[k]) for k in ("x0", "y0", "x1", "y1")}}
             self.zones = [o for o in self.zones if o["id"] != z["id"]] + [z]
             self.save()
@@ -316,6 +329,11 @@ class Map:
 
     def clearance(self, unknown_bad=True, box=None):
         """mm from each cell to the nearest edge / obstacle / zone (/ unknown), inside box."""
+        sc = self.safe_cells()
+        if box is None and sc:
+            bi = self._bbox()
+            box = (min(bi[0], min(c[0] for c in sc) - 2), min(bi[1], min(c[1] for c in sc) - 2),
+                   max(bi[2], max(c[0] for c in sc) + 2), max(bi[3], max(c[1] for c in sc) + 2))
         i0, j0, i1, j1 = box or self._bbox()
         zc = self.zone_cells()
         W, H = i1 - i0 + 1, j1 - j0 + 1
@@ -325,7 +343,11 @@ class Map:
             for i in range(i0, i1 + 1):
                 k = j * N + i
                 f = self.floor[k]
-                bad = (f == EDGE or self.obst[k] >= OBST or (i, j) in zc or (unknown_bad and f == UNKNOWN)
+                if sc and unknown_bad:  # safe areas drawn: only those count (plus the dock's own spot)
+                    known = (i, j) in sc or (f == FLOOR and math.hypot(*self.centre(i, j)) < 220)
+                else:
+                    known = f != UNKNOWN or (i, j) in sc
+                bad = (f == EDGE or self.obst[k] >= OBST or (i, j) in zc or (unknown_bad and not known)
                        or i in (i0, i1) or j in (j0, j1))
                 if bad:
                     dist[(j - j0) * W + (i - i0)] = 0
@@ -785,20 +807,16 @@ class Driver:
         """Get over a low lip: arms up and a firmer push; then push down with the arms to lift his front."""
         from anki_vector.util import distance_mm, speed_mmps
         r = self.r
+        # (pushing down with the arms tilted him enough to count as 'picked up', which wipes his position,
+        # so it's arms up and a firmer push, twice)
         for attempt in (1, 2):
             x0, y0, _ = self.pose()
             try:
                 self.lift(1.0)
-                if attempt == 1:
-                    self.leg(50, 75)
-                else:  # arms down against the desk: tilts his front up onto the lip while the treads push
-                    self.back(15)
-                    self.call(lambda: r.motors.set_lift_motor(-4), 3, "set_lift_motor")
-                    self.call(lambda: r.motors.set_wheel_motors(55, 55), 3, "set_wheel_motors")
-                    time.sleep(1.2)
-                    self.call(lambda: r.motors.set_wheel_motors(0, 0), 3, "set_wheel_motors")
-                    self.call(lambda: r.motors.set_lift_motor(0), 3, "set_lift_motor")
-                    self.lift(1.0)
+                if True:
+                    if attempt == 2:
+                        self.back(15)
+                    self.leg(50, 75 if attempt == 1 else 90)
             except (Lost, InterruptedError):
                 raise
             except Exception as e:  # noqa: BLE001

@@ -394,7 +394,11 @@ function drawDesk() {
   };
   const [dx0, dy0, dx1, dy1] = m.dock; rect(dx0, dy0, dx1, dy1, "rgba(10,132,255,.25)", "#0a84ff");
   g.font = "600 22px -apple-system, sans-serif";
-  for (const z of m.zones) {
+  for (const z of m.zones.filter(z => z.kind === "floor")) {  // safe areas underneath everything
+    const [a, b] = rect(z.x0, z.y0, z.x1, z.y1, "rgba(48,209,88,.16)", "#30d158", [10, 6]);
+    g.fillStyle = "#a6f0b8"; g.fillText(z.name, a + 6, b + 24);
+  }
+  for (const z of m.zones.filter(z => z.kind !== "floor")) {
     const on = z.kind === "keepout" || z.present;
     const [a, b] = rect(z.x0, z.y0, z.x1, z.y1, on ? "rgba(191,90,242,.22)" : "rgba(142,142,147,.08)",
       on ? "#bf5af2" : "#636366", z.kind === "sometimes" ? [8, 6] : null);
@@ -414,7 +418,7 @@ function drawDesk() {
 function dmZones() {
   const box = $("#dm-zones"), zs = (DM && DM.zones) || [];
   box.style.display = zs.length ? "" : "none";
-  box.innerHTML = zs.map(z => `<div class="row"><div class="rl">${esc(z.name)}<small>${z.kind === "keepout" ? "Always there: he never goes here" : (z.present ? "On the desk now: avoided" : "Off the desk now: free space")}</small></div><div class="rr">${z.kind === "sometimes" ? `<label class="sw"><input type="checkbox" data-zp="${z.id}" ${z.present ? "checked" : ""}><span></span></label>` : ""} <button class="btn small danger" data-zd="${z.id}">Remove</button></div></div>`).join("");
+  box.innerHTML = zs.map(z => `<div class="row"><div class="rl">${esc(z.name)}<small>${z.kind === "floor" ? "Safe to drive: he roams only inside areas like this" : z.kind === "keepout" ? "Always there: he never goes here" : (z.present ? "On the desk now: avoided" : "Off the desk now: free space")}</small></div><div class="rr">${z.kind === "sometimes" ? `<label class="sw"><input type="checkbox" data-zp="${z.id}" ${z.present ? "checked" : ""}><span></span></label>` : ""} <button class="btn small danger" data-zd="${z.id}">Remove</button></div></div>`).join("");
   box.querySelectorAll("[data-zd]").forEach(b => b.onclick = async () => { await tryApi("/api/deskmap", { op: "zone_delete", id: b.dataset.zd }, "Removed"); refreshMap(); });
   box.querySelectorAll("[data-zp]").forEach(c => c.onchange = async () => { await tryApi("/api/deskmap", { op: "present", id: c.dataset.zp, present: c.checked }, c.checked ? "He'll avoid it" : "Space freed up"); refreshMap(); });
 }
@@ -449,7 +453,7 @@ document.querySelectorAll("#dm-kind button").forEach(b => b.onclick = () => {
 });
 $("#dm-cancel").onclick = () => { dmRect = null; $("#dm-new").classList.remove("on"); drawDesk(); };
 $("#dm-save").onclick = async () => {
-  const [x0, y0, x1, y1] = dmRect, name = $("#dm-name").value.trim() || (dmKind === "sometimes" ? "Laptop" : "Keep out");
+  const [x0, y0, x1, y1] = dmRect, name = $("#dm-name").value.trim() || (dmKind === "sometimes" ? "Laptop" : dmKind === "floor" ? "Safe area" : "Keep out");
   await tryApi("/api/deskmap", { op: "zone", zone: { name, kind: dmKind, present: true, x0, y0, x1, y1 } }, `Added ${name}`);
   dmRect = null; $("#dm-name").value = ""; $("#dm-new").classList.remove("on"); refreshMap();
 };

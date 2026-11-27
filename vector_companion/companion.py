@@ -1093,7 +1093,7 @@ class Companion:
         if r is None or not m.anchor:
             return
         boxes = [(z["x0"], z["y0"], z["x1"], z["y1"]) for z in m.zones
-                 if z.get("kind") == "keepout" or z.get("present", True)]
+                 if z.get("kind") == "keepout" or (z.get("kind") == "sometimes" and z.get("present", True))]
         boxes += m.blocks("obstacle", 25) + m.blocks("edge", 30)
 
         def go():

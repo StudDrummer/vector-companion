@@ -356,4 +356,24 @@ def talking() -> Image.Image:
     return _done(im)
 
 
-ICONS.update({"listening": listening, "thinking": thinking_dots, "talking": talking})
+def jarvis_idle(clock: str = "") -> Image.Image:
+    """Jarvis mode's resting face: a quiet glowing core with the time, instead of Vector's eyes."""
+    im, d = _hi()
+    cx, cy = W * S3 / 2 - (110 if clock else 0), H * S3 / 2
+    for r, col, w in ((112, (14, 40, 60), 5), (92, (24, 90, 130), 4), (72, (50, 150, 210), 3)):
+        d.ellipse([cx - r, cy - r, cx + r, cy + r], outline=col, width=w)
+    for i in range(12):  # tick marks
+        import math
+        a = i * math.pi / 6
+        r1, r2 = 100, 112 if i % 3 == 0 else 106
+        d.line([(cx + r1 * math.cos(a), cy + r1 * math.sin(a)), (cx + r2 * math.cos(a), cy + r2 * math.sin(a))],
+               fill=(70, 170, 230), width=3)
+    d.ellipse([cx - 22, cy - 22, cx + 22, cy + 22], fill=(120, 210, 255))
+    d.ellipse([cx - 12, cy - 12, cx + 12, cy + 12], fill=(225, 248, 255))
+    if clock:
+        d.text((cx + 150, cy - 40), clock, fill=(200, 236, 255), font=_font(84), anchor="lm")
+        d.text((cx + 152, cy + 46), "J.A.R.V.I.S.", fill=(70, 160, 220), font=_font(30), anchor="lm")
+    return _done(im)
+
+
+ICONS.update({"listening": listening, "thinking": thinking_dots, "talking": talking, "jarvis": jarvis_idle})

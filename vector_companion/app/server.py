@@ -632,6 +632,13 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/settings":
                 return self._json({"app": S.save(b.get("app", {})),
                                    "brain": save_brain(b["brain"]) if "brain" in b else brain_settings()})
+            if path == "/api/mode":
+                st = S.set_mode(str(b.get("mode", "")))
+                try:
+                    cc.call("/mode_changed", {"mode": st["mode"]}, timeout=5)
+                except Exception:  # noqa: BLE001
+                    pass
+                return self._json({"ok": True, "mode": st["mode"]})
             if path == "/api/connections":
                 up = {}
                 url_ = str(b.get("canvas_url", "")).strip().rstrip("/")

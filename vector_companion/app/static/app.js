@@ -488,7 +488,7 @@ async function providerUI(current) {
 segBind("#provider", () => providerUI());
 const STYLE_HELP = { vector: "Playful little robot", jarvis: "Calm, witty and quick. Calls you sir and suggests next steps." };
 function styleHelp() { $("#style-help").textContent = STYLE_HELP[$("#style .on")?.dataset.v || "vector"]; }
-segBind("#style", async v => { styleHelp(); await tryApi("/api/settings", { app: { persona: { style: v } } }, v === "vector" ? "Back to classic Vector" : v.toUpperCase() + " mode on"); });
+segBind("#style", async v => { styleHelp(); showMode(v); await tryApi("/api/mode", { mode: v }, v === "vector" ? "Vector mode" : "Jarvis mode"); });
 $("#brain-save").addEventListener("click", async () => {
   const provider = $("#provider .on")?.dataset.v || "ollama";
   const key = $("#api-key").value.trim();
@@ -785,11 +785,22 @@ setInterval(() => { if (current === "guard") loadGuard(); }, 8000);
 /* ---------------- live state: keep the app matched to what he's doing ----------------
    Games, timers and modes can start from the app, by voice or from the cube, so read them from him every few seconds. */
 let LIVE = {};
+function showMode(mode) {
+  $$("#modesw button").forEach(b => b.classList.toggle("on", b.dataset.mode === mode));
+  document.body.classList.toggle("jarvis", mode === "jarvis");
+  $("#rc-name").textContent = mode === "jarvis" ? "Jarvis" : "Vector";
+}
+$$("#modesw button").forEach(b => b.addEventListener("click", async () => {
+  const m = b.dataset.mode; showMode(m);
+  await tryApi("/api/mode", { mode: m }, m === "jarvis" ? "Jarvis mode: Vector's personality is off" : "Vector mode: he's himself again");
+  if (typeof loadBrain === "function" && current === "brain") loadBrain();
+}));
 async function syncLive() {
   let h; try { h = await api("/api/companion/health"); } catch { return; }
   if (!h) return;
   LIVE = h;
   showPose(h.pose);
+  if (h.mode) showMode(h.mode);
   const mm = s => `${Math.floor(s / 60)}:${String(Math.max(0, s % 60)).padStart(2, "0")}`;
   // sidebar chip
   const parts = [];

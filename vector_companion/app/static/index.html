@@ -12,9 +12,13 @@
     <div class="robot-card" data-go="overview">
       <div class="avatar"><span class="eye"></span><span class="eye"></span></div>
       <div class="rc-text">
-        <div class="rc-name">Vector</div>
+        <div class="rc-name" id="rc-name">Vector</div>
         <div class="rc-sub"><span class="dot" id="sb-dot"></span><span id="sb-status">Connecting...</span></div>
       </div>
+    </div>
+    <div class="modesw" id="modesw" role="radiogroup" aria-label="Mode">
+      <button data-mode="jarvis"><b>Jarvis</b><small>All AI, no Vector</small></button>
+      <button data-mode="vector"><b>Vector</b><small>Playful + skills</small></button>
     </div>
     <div class="now" id="sb-now" hidden></div>
     <nav id="nav">

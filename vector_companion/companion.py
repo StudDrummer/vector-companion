@@ -77,6 +77,13 @@ class VectorOffline(RuntimeError):
     pass
 
 
+def jarvis_mode() -> bool:
+    """Jarvis mode: Vector's own personality is switched off and he's purely the AI's body.
+    Vector mode: his playful self, with all of Jarvis's skills still a voice command away."""
+    st = S.load()
+    return (st.get("mode") or st.get("persona", {}).get("style", "vector")) == "jarvis"
+
+
 def prefs() -> dict:
     return S.load()["companion"]
 
@@ -278,7 +285,7 @@ class Companion:
             pass
         m = getattr(getattr(self, "actions", None), "motion", None)
         want = (safety().get("keep_still", True) and self.connected and time.time() >= self.still_paused_until
-                and (bool(safety().get("dock_lock")) or on_dock) and not (m and m.busy))
+                and (bool(safety().get("dock_lock")) or jarvis_mode()) and not (m and m.busy))
         if want and self.reserve is None:
             def hold():
                 from anki_vector.behavior import ReserveBehaviorControl
@@ -458,6 +465,9 @@ class Companion:
             time.sleep(1)
             if not self.ctl_held or time.time() - self.ctl_last < self.CONTROL_IDLE or self.mirror_on:
                 continue
+            m = getattr(self.actions, "motion", None)
+            if jarvis_mode() and not (m and m.busy):
+                continue  # Jarvis mode keeps control: no "him" coming back between commands, no re-asking (faster)
             if self.actions.bj and self.actions.bj.active and time.time() - self.ctl_last < 180:
                 continue  # keep the cards on his face while you think
             if not self.lock.acquire(blocking=False):
@@ -471,6 +481,34 @@ class Companion:
                 self.ctl_held = False
                 self.lock.release()
 
+    def _jarvis_face_loop(self):
+        """In Jarvis mode his eyes are replaced by the Jarvis display (with the time), so nothing of
+        Vector's own character shows. Anything else on his face (cards, timers, icons) takes priority."""
+        last = 0.0
+        while True:
+            time.sleep(2)
+            try:
+                if not (jarvis_mode() and self.connected) or self.mirror_on:
+                    continue
+                if time.time() < getattr(self, "screen_until", 0) or time.time() < self.speaking_until:
+                    last = 0.0
+                    continue
+                m = getattr(self.actions, "motion", None)
+                if (m and m.busy) or (self.actions.bj and self.actions.bj.active):
+                    continue
+                if time.time() - last < 25:
+                    continue
+                img = face_art.jarvis_idle(datetime.now().strftime("%-I:%M"))
+                with self.control(wait=2) as r:
+                    self._idle_drawing = True
+                    try:
+                        self.put_screen(r, img, 30)
+                    finally:
+                        self._idle_drawing = False
+                last = time.time()
+            except Exception:  # noqa: BLE001
+                last = time.time() - 15  # try again soon
+
     def control(self, wait: float = 12):
         return Companion._Control(self, wait)
 
@@ -482,6 +520,8 @@ class Companion:
         if img.size != size:
             img = img.resize(size)
         data = scr.convert_image_to_screen_data(img)
+
+        self.screen_until = time.time() + seconds
 
         def _do(r):
             r.screen.set_screen_with_image_data(data, seconds, interrupt_running=True)
@@ -500,6 +540,8 @@ class Companion:
         if img.size != size:
             img = img.resize(size)
         r.screen.set_screen_with_image_data(scr.convert_image_to_screen_data(img), seconds, interrupt_running=True)
+        if not getattr(self, "_idle_drawing", False):
+            self.screen_until = time.time() + seconds
 
     def face(self, icon: str = "", text: str = "", seconds: float = 3.0):
         """Put an icon or words on his face and return right away (doesn't hold him up)."""
@@ -1077,7 +1119,7 @@ class Companion:
         while True:
             time.sleep(0.15)
             r = self._robot
-            if r is None or not prefs()["pet_hearts"]:
+            if r is None or not prefs()["pet_hearts"] or jarvis_mode():
                 touching_since = None
                 continue
             try:
@@ -1540,6 +1582,7 @@ class Handler(BaseHTTPRequestHandler):
                                         "prefs": prefs(), "safety": safety(), "guard": bool(COMP.guard),
                                         "speaking": time.time() < COMP.speaking_until, "voice": COMP.voice_engine(),
                                         "cube": COMP.cube_connected, "pose": COMP.pose_now(),
+                                        "mode": "jarvis" if jarvis_mode() else "vector",
                                         "busy": (COMP.actions.motion.busy if getattr(COMP.actions, "motion", None) else None)})
             if u.path == "/reminders":
                 return self._send(200, {"reminders": COMP.reminders.items})
@@ -1647,6 +1690,20 @@ class Handler(BaseHTTPRequestHandler):
                     COMP.stop_mirror()
             elif u.path == "/still":
                 COMP.pause_still(float(b.get("pause", 45)))
+            elif u.path == "/mode_changed":
+                def switch(mode=str(b.get("mode"))):
+                    COMP._wake.set()  # take (or drop) the still-hold right away
+                    try:
+                        if mode == "jarvis":
+                            COMP.announce("Jarvis online.", "jarvis")
+                        else:
+                            COMP.ctl_last = 0.0  # hand him back to himself
+                            with COMP.control(wait=5) as r:
+                                play_trigger(r, COMP.find_trigger("GreetAfterLongTime", "OnboardingReactToFaceHappy") or "CelebrateSuccess")
+                            COMP.release_now()
+                    except Exception as e:  # noqa: BLE001
+                        log(f"mode switch effect skipped: {e}")
+                threading.Thread(target=switch, daemon=True).start()
             elif u.path == "/remind":
                 if b.get("clear"):
                     COMP.reminders.clear()
@@ -1763,6 +1820,7 @@ def main():
     log("companion starting")
     COMP = Companion()
     COMP.reminders = Reminders(COMP)
+    threading.Thread(target=COMP._jarvis_face_loop, daemon=True).start()
     _quiet_sdk_logs()
     threading.Timer(20, _quiet_sdk_logs).start()  # again once the SDK has connected and added its loggers
     COMP.resume_focus()

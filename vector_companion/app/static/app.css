@@ -252,3 +252,14 @@ kbd{display:inline-block;min-width:20px;padding:0 5px;border-radius:5px;backgrou
 
 .report{display:block}.report summary{cursor:pointer;list-style:none}.report summary::-webkit-details-marker{display:none}
 .rtext{white-space:pre-wrap;font:13px/1.5 -apple-system,system-ui,sans-serif;color:var(--txt2);margin:8px 0 4px;max-height:360px;overflow:auto}
+
+/* Jarvis / Vector mode switch */
+.modesw{display:flex;gap:6px;margin:0 12px 10px;padding:4px;border-radius:12px;background:var(--fill,rgba(127,127,127,.12))}
+.modesw button{flex:1;border:0;border-radius:9px;padding:7px 6px;background:transparent;color:var(--txt2);cursor:pointer;text-align:center;line-height:1.15;font:inherit}
+.modesw button b{display:block;font-size:13px;font-weight:600;color:var(--txt)}
+.modesw button small{font-size:10.5px}
+.modesw button.on[data-mode=jarvis]{background:linear-gradient(135deg,#0a3d62,#0a84ff);color:#d8f0ff}
+.modesw button.on[data-mode=vector]{background:linear-gradient(135deg,#1f6f43,#30d158);color:#e8ffef}
+.modesw button.on b,.modesw button.on small{color:inherit}
+body.jarvis .avatar{background:radial-gradient(circle at 50% 50%,#bfeaff 0 18%,#2a8fd6 19% 24%,#06121c 25%)}
+body.jarvis .avatar .eye{display:none}

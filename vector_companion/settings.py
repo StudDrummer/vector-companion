@@ -33,6 +33,7 @@ DEFAULTS: dict = {
         "eye_flash": True,
     },
     "quiet_hours": {"enabled": False, "start": "22:30", "end": "07:00"},
+    "mode": "",  # "jarvis" or "vector" (set from the app; empty = follow persona.style)
     "persona": {"style": "vector"},
     "safety": {"dock_lock": True, "keep_still": True},
     "companion": {"pet_hearts": True, "greetings": True, "morning_briefing": True,
@@ -129,3 +130,19 @@ def write_env(updates: dict[str, str]) -> None:
         if k not in done:
             lines.append(f"{k}={v}")
     ENV_FILE.write_text("\n".join(lines) + "\n")
+
+
+MODES = {
+    # Jarvis: Vector's own personality is off. Held still, Jarvis display instead of eyes, Jarvis voice and manner.
+    "jarvis": {"mode": "jarvis", "persona": {"style": "jarvis"}, "voice": {"engine": "auto"},
+               "companion": {"pet_hearts": False, "greetings": True}},
+    # Vector: his playful self (idle behaviors, his own voice, reactions), with Jarvis's skills still available.
+    "vector": {"mode": "vector", "persona": {"style": "vector"}, "voice": {"engine": "auto"},
+               "companion": {"pet_hearts": True, "greetings": True}},
+}
+
+
+def set_mode(mode: str) -> dict:
+    if mode not in MODES:
+        raise ValueError("mode must be jarvis or vector")
+    return save(MODES[mode])

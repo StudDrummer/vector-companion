@@ -63,6 +63,8 @@ class SmartTurn:
         x[-len(a):] = a[-128000:]
         return float(self.s.run(None, {"audio": x[None]})[0][0][0])
 MIC_OFF = re.compile(r"\b(stop listening|mic off|turn off (the |your )?(mic|microphone|listening)|mute (the |your )?(mic|microphone))\b", re.I)
+FILLER = re.compile(r"\W*(mm+-?hmm+|uh+-?huh|hmm+|uh+|um+|ok(ay)?|yeah|yep|yes|no|nope|sure|right|cool|nice|"
+                    r"thanks?( you)?( very much)?|got it|alright|all right)\W*", re.I)
 STOP_WORDS = re.compile(r"^(never ?mind|stop|cancel|nothing|that'?s all|thanks?,? (that'?s all|jarvis)|thank you,? jarvis)\W*$", re.I)
 
 
@@ -607,6 +609,9 @@ class Ears:
                         from .voice import speak
                         speak("Sorry sir, I didn't catch that." if self.prefs()["persona"].get("style") == "jarvis"
                               else "Sorry, I didn't catch that.")
+                break
+            if turns > 0 and not self.game and FILLER.fullmatch(text.strip()):
+                log(f"follow-up was just {text!r}; not answering")  # 'Mm-hmm.' once got a made-up speech
                 break
             if MIC_OFF.search(text):
                 S.save({"ears": {"enabled": False}})

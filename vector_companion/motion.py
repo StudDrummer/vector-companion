@@ -37,6 +37,11 @@ def _mm(d):
     return distance_mm(d)
 
 
+def _degps(d):
+    from anki_vector.util import degrees
+    return degrees(d)
+
+
 def _speed(s):
     from anki_vector.util import speed_mmps
     return speed_mmps(s)
@@ -112,21 +117,27 @@ class Motion:
             except Exception as e:  # noqa: BLE001
                 log(f"motion: cube bluetooth not connected ({e.__class__.__name__}); finding it by sight")
         cube = cube or r.world._light_cube.get(next(iter(r.world._light_cube)))
-        seen = lambda: bool(cube and cube.is_visible)  # noqa: E731
+        since = time.time() - 3
+
+        def seen():
+            # is_visible lapses about a second after the last sighting, so a glimpse mid-turn was missed;
+            # any sighting since the search began counts
+            t = getattr(cube, "last_observed_time", None) if cube else None
+            return bool(cube and (cube.is_visible or (t and t > since)))
         log(f"motion: cube connected={bool(r.world.connected_light_cube)} visible={seen()} "
             f"on_charger={r.status.is_on_charger}")
         if seen() or not search:
             return cube
         self._call(lambda: r.behavior.set_lift_height(0.0), 10, "set_lift_height")
-        for head in (-5, 10):  # look low first, then a little higher
+        for head in (-20, -5, 12):  # close, mid, far: the markers have to be in frame and in focus
             self._call(lambda: r.behavior.set_head_angle(_deg(head)), 10, "set_head_angle")
-            for step in range(8):  # a full circle in 45-degree steps
-                time.sleep(1.2)  # give his vision a moment to recognise the markers
+            for step in range(12):  # a full circle in 30-degree steps (45 skipped past it)
+                time.sleep(0.9)
                 if seen():
                     log(f"motion: cube spotted (head {head}, step {step})")
                     return cube
-                self._call(lambda: r.behavior.turn_in_place(_deg(45)), 15, "turn_in_place")
-            if head == -5:  # maybe he's too close to it: back up a little and look again
+                self._call(lambda: r.behavior.turn_in_place(_deg(30), speed=_degps(90)), 15, "turn_in_place")
+            if head == -20:  # maybe he's too close to it: back up a little and look again
                 self._call(lambda: r.behavior.drive_straight(_mm(-80), _speed(60)), 15, "drive_straight")
         raise RuntimeError("couldn't find the cube")
 

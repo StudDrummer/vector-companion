@@ -1086,6 +1086,8 @@ class Companion:
                 st = r.status
                 if st.is_on_charger or st.is_picked_up or getattr(st, "is_being_held", False):
                     off_since = None
+                    if st.is_on_charger or st.is_picked_up:
+                        self.home_tries, self.home_asked = 0, False
                     continue
             except Exception:  # noqa: BLE001
                 continue
@@ -1101,11 +1103,33 @@ class Companion:
                 off_since = None
 
     def _return_home(self):
+        """Back to the dock along the desk map when he knows where he is (his own 'find the charger'
+        drives around searching, blind to the map). Two tries, then he stays put and says so, instead of
+        searching the desk over and over."""
+        from . import deskmap
         self.returning = True
+        tries = getattr(self, "home_tries", 0)
         try:
+            if tries >= 2:
+                if not getattr(self, "home_asked", False):
+                    self.home_asked = True
+                    log("couldn't find the charger twice: staying put")
+                    self.say("I can't find my charger, sir. Please put me on it." if jarvis_mode()
+                             else "I can't find my charger. Can you put me on it?")
+                return
+            self.home_tries = tries + 1
             log("he's off the charger with nothing to do: sending him back")
             with self.control(wait=5) as r:
-                self.call(lambda: r.behavior.drive_on_charger(), 60, "drive_on_charger")
+                m = deskmap.get()
+                if not m.anchored(r):
+                    m.anchor_from_charger(r)
+                if m.anchored(r):
+                    def regain():
+                        self.call(lambda: r.conn.request_control(timeout=6), 8, "request_control")
+                    d = deskmap.Driver(m, r, self.call, threading.Event(), log, self.has_control, regain)
+                    deskmap.go_home(m, d, r, self.call, log)
+                else:
+                    self.call(lambda: r.behavior.drive_on_charger(), 60, "drive_on_charger")
         except Exception as e:  # noqa: BLE001
             log(f"couldn't drive back to the charger ({e})")
         finally:

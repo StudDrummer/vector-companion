@@ -395,6 +395,5 @@ class Motion:
         self._say("Routine complete." if jarvis else "Ta-da!")
 
     def go_to_charger(self):
-        with self.c.control():
-            r = self.c.raw  # unwrapped: these calls get their own long time limits below
-            self._call(lambda: r.behavior.drive_on_charger(), 60, "drive_on_charger")
+        self.c.home_tries, self.c.home_asked = 0, False
+        self.c._return_home()

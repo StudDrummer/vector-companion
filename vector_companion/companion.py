@@ -805,7 +805,8 @@ class Companion:
         try:
             st = r.status
             out.update(on_charger=bool(st.is_on_charger), cliff=bool(st.is_cliff_detected),
-                       picked_up=bool(st.is_picked_up), held=bool(getattr(st, "is_being_held", False)))
+                       picked_up=bool(st.is_picked_up), held=bool(getattr(st, "is_being_held", False)),
+                       calm=bool(getattr(st, "is_in_calm_power_mode", False)))
         except Exception:  # noqa: BLE001
             pass
         try:

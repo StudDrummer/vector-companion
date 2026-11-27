@@ -823,7 +823,7 @@ def go_home(m: Map, d: Driver, r, call, log=print) -> bool:
         log(f"deskmap: couldn't line up with the dock ({e})")
     before = m.where(r)
     try:
-        call(lambda: r.behavior.drive_on_charger(), 60, "drive_on_charger")
+        call(lambda: r.behavior.drive_on_charger(), 120, "drive_on_charger")
     except Exception as e:  # noqa: BLE001
         log(f"deskmap: docking failed ({e})")
     time.sleep(1.0)
@@ -843,7 +843,7 @@ def scan(m: Map, r, call, cancel, say=print, log=print, minutes: float = 10, con
     from anki_vector.util import degrees
     deadline = time.time() + minutes * 60
     if not r.status.is_on_charger:
-        call(lambda: r.behavior.drive_on_charger(), 60, "drive_on_charger")
+        call(lambda: r.behavior.drive_on_charger(), 120, "drive_on_charger")
         time.sleep(1.0)
         if not r.status.is_on_charger:
             raise RuntimeError("Put me on my charger first, so the map starts from there.")

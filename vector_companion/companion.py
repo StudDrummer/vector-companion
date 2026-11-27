@@ -50,7 +50,7 @@ OWNER = os.environ.get("VECTOR_OWNER", "Rushil")
 QUEUED_ACTIONS = {"pickup_object", "roll_cube", "pop_a_wheelie", "place_object_on_ground_here", "look_around_in_place",
                   "turn_towards_face", "drive_off_charger", "play_animation_trigger", "play_animation", "set_lift_height", "set_head_angle", "say_text",
                   "drive_straight", "turn_in_place", "drive_on_charger"}
-TIMEOUTS = {"say_text": 45, "play_animation_trigger": 20, "drive_on_charger": 45, "drive_off_charger": 30,
+TIMEOUTS = {"say_text": 45, "play_animation_trigger": 20, "drive_on_charger": 120, "drive_off_charger": 30,
             "capture_single_image": 12, "request_control": 8, "release_control": 5,
             "set_screen_with_image_data": 6, "get_battery_state": 6, "connect": 20, "drive_straight": 20,
             "turn_in_place": 20}
@@ -1129,7 +1129,7 @@ class Companion:
                     d = deskmap.Driver(m, r, self.call, threading.Event(), log, self.has_control, regain)
                     deskmap.go_home(m, d, r, self.call, log)
                 else:
-                    self.call(lambda: r.behavior.drive_on_charger(), 60, "drive_on_charger")
+                    self.call(lambda: r.behavior.drive_on_charger(), 120, "drive_on_charger")
         except Exception as e:  # noqa: BLE001
             log(f"couldn't drive back to the charger ({e})")
         finally:

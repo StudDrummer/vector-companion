@@ -410,8 +410,7 @@ class Companion:
             try:
                 r = self.o.robot
                 if not self.o.has_control():  # asking for control takes ~1 s; keep it between commands
-                    r.conn.request_control(timeout=6)
-                    self.o.ctl_held = True
+                    self.o.ensure_control()
                 self.o.ctl_last = time.time()
                 return r
             except Exception:
@@ -428,6 +427,38 @@ class Companion:
             return False
 
     CONTROL_IDLE = 15.0  # seconds of quiet before handing his body back to him
+
+    def ensure_control(self, timeout: float = 6.0):
+        """Ask for his body and WAIT until he actually hands it over. (The SDK's request returns at once;
+        commands sent before the grant hang, which is what 'slow to answer' mostly was.) If he never
+        grants it twice in a row while nothing is holding him, the control channel itself is stuck:
+        reconnect instead of limping on."""
+        r = self._robot
+        if r is None:
+            raise VectorOffline("Vector isn't connected")
+        ev = r.conn._control_events
+        if ev.has_control:
+            self.ctl_held = True
+            return
+        r.conn.request_control(timeout=timeout)
+        t0 = time.time()
+        while time.time() - t0 < timeout:
+            if ev.has_control:
+                self.ctl_held = True
+                self.control_fails = 0
+                return
+            time.sleep(0.05)
+        try:
+            held = r.status.is_picked_up or getattr(r.status, "is_being_held", False)
+        except Exception:  # noqa: BLE001
+            held = False
+        if not held:
+            self.control_fails = getattr(self, "control_fails", 0) + 1
+            if self.control_fails >= 2:
+                self.control_fails = 0
+                log("he stopped handing over control (control channel stuck): reconnecting")
+                self.mark_dead("control channel stuck")
+        raise VectorOffline("Vector didn't hand over control. Try again in a moment.")
 
     def has_control(self) -> bool:
         if not self.ctl_held or self._robot is None:
@@ -935,7 +966,7 @@ class Companion:
                 if want != (0.0, 0.0) and not holding:
                     if self.lock.acquire(timeout=2):
                         try:
-                            self.robot.conn.request_control(timeout=6)
+                            self.ensure_control()
                             holding = True
                         except Exception:  # noqa: BLE001
                             self.lock.release()
@@ -1136,7 +1167,7 @@ class Companion:
                     m.anchor_from_charger(r)
                 if m.anchored(r):
                     def regain():
-                        self.call(lambda: r.conn.request_control(timeout=6), 8, "request_control")
+                        self.ensure_control()
                     d = deskmap.Driver(m, r, self.call, threading.Event(), log, self.has_control, regain)
                     deskmap.go_home(m, d, r, self.call, log)
                 else:

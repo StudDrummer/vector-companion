@@ -234,9 +234,7 @@ class Motion:
         c = self.c
 
         def regain():
-            r = c.raw
-            c.call(lambda: r.conn.request_control(timeout=6), 8, "request_control")
-            c.ctl_held = True
+            c.ensure_control(timeout=10)
         return c.has_control, regain
 
     def _safe_forward(self, r, mm: float):

@@ -63,6 +63,9 @@ class SmartTurn:
         x[-len(a):] = a[-128000:]
         return float(self.s.run(None, {"audio": x[None]})[0][0][0])
 MIC_OFF = re.compile(r"\b(stop listening|mic off|turn off (the |your )?(mic|microphone|listening)|mute (the |your )?(mic|microphone))\b", re.I)
+GAME_WORDS = re.compile(r"\b(hit|hit me|another( card)?|one more|card|stand|stay|i'?m good|hold|fold|what('?s| is) my "
+                        r"(hand|score|total|cards?)|what do i have|quit|stop( playing)?|end( the)? game|i'?m done|deal|again|"
+                        r"play again|new game|another (game|round))\b", re.I)
 FILLER = re.compile(r"\W*(mm+-?hmm+|uh+-?huh|hmm+|uh+|um+|ok(ay)?|yeah|yep|yes|no|nope|sure|right|cool|nice|"
                     r"thanks?( you)?( very much)?|got it|alright|all right)\W*", re.I)
 STOP_WORDS = re.compile(r"^(never ?mind|stop|cancel|nothing|that'?s all|thanks?,? (that'?s all|jarvis)|thank you,? jarvis)\W*$", re.I)
@@ -337,7 +340,11 @@ class Ears:
         while True:
             try:
                 h = call("/health", timeout=2)
-                self.game = bool(h.get("quiz") or h.get("blackjack"))
+                g = "quiz" if h.get("quiz") else ("blackjack" if h.get("blackjack") else False)
+                if g:
+                    self.game, self.game_until = g, time.time() + 25  # 'play again' right after a hand
+                elif time.time() > getattr(self, "game_until", 0):
+                    self.game = False
                 if h.get("speaking"):
                     now = time.time()
                     self.vector_busy_until = now + 0.8
@@ -552,6 +559,9 @@ class Ears:
             if dur - quiet * FRAME / SR < 0.3:
                 continue  # a click or a cough
             t0 = time.time()
+            if not hit and self.game and dur < 6 and self.game_turn(frames):
+                self.after_conversation(lead)
+                continue
             if not hit and not self.heard_name(frames):
                 prev, prev_end = frames, time.time()
                 continue
@@ -580,6 +590,19 @@ class Ears:
                 # (no spoken "Sir?": you'd start talking over it and lose the first words)
                 self.conversation(self.record(wait_for_speech=5.0), first=True, quiet_fail=True)
             self.after_conversation(lead)
+
+    def game_turn(self, frames) -> bool:
+        """In blackjack or a quiz you don't need to say 'Jarvis' first: 'hit', 'stand', or a quiz answer
+        goes straight in."""
+        text = self.transcribe(frames)
+        if not text:
+            return False
+        if self.game == "blackjack" and not GAME_WORDS.search(text):
+            return False
+        log(f"game: heard {text!r}")
+        self.set(state="hearing you")
+        self.conversation(None, first=True, text=text)
+        return True
 
     def idle_state(self) -> str:
         return f"listening for '{WAKE_WORDS[self.wake_word()]}'"

@@ -21,7 +21,11 @@ import random
 import threading
 import time
 
-from . import settings as S
+from . import face_art, settings as S
+
+HUD_TITLES = {"fetch_cube": "TARGET: CUBE", "roll_cube": "TARGET: CUBE", "pop_a_wheelie": "MANEUVER",
+              "come_here": "APPROACH", "look_at_me": "TRACKING", "explore": "PATROL", "roam": "PATROL",
+              "desk_scan": "MAPPING DESK", "go_to_charger": "DOCKING"}
 
 ACTIONS = ("fetch_cube", "roll_cube", "pop_a_wheelie", "come_here", "explore", "dance", "go_to_charger",
            "desk_scan", "roam", "stop_moving")
@@ -71,15 +75,35 @@ class Motion:
     def start(self, action: str) -> dict:
         if action == "stop_moving":
             return self.stop()
-        if S.load()["safety"].get("dock_lock"):
+        if S.load()["safety"].get("dock_lock") and action not in ("dance", "look_at_me"):  # those stay on the dock
             raise PermissionError("The dock lock is on. Turn it off (Drive & Camera or Robot Settings) to let him drive.")
         if not self.lock.acquire(blocking=False):
             raise RuntimeError(f"He's still busy with {self.busy.replace('_', ' ')}.")
         self.busy = action
+        self.step = ""
         self.cancel.clear()
-        self.c.pause_still(5)  # let go of the hold so he can move; it comes back once he's docked and idle
+        self.c.pause_still(5, keep_control=True)  # drop the still-hold (control itself is kept the whole time)
         threading.Thread(target=self._run, args=(action,), daemon=True).start()
+        threading.Thread(target=self._hud, args=(action,), daemon=True).start()
         return {"started": action}
+
+    def _hud(self, action: str):
+        """Jarvis mode: while he works, his face is a HUD (radar, task, progress), never Vector's eyes."""
+        from . import deskmap
+        k = 0
+        time.sleep(0.5)
+        while self.busy == action:
+            if _jarvis() and time.time() >= self.c.speaking_until and action != "dance":
+                p = deskmap.get().progress
+                sub = (p or {}).get("step") or self.step or "in progress"
+                img = face_art.hud_action(HUD_TITLES.get(action, action.replace("_", " ")), sub, phase=(k % 8) / 8)
+                r = self.c.raw
+                try:
+                    self.c.call(lambda: self.c.put_screen(r, img, 3), 5, "hud")
+                except Exception:  # noqa: BLE001
+                    pass
+            k += 1
+            time.sleep(1.2)
 
     def _run(self, action: str):
         from .companion import log
@@ -100,6 +124,7 @@ class Motion:
             self._say(self._friendly(action, msg))
         finally:
             deskmap.get().progress = None
+            self.c.motion_ended = time.time()
             self.c.cube_handled_until = time.time() + 5
             self.c.still_paused_until = 0  # the cube settling after he lets go isn't a tap
             self.busy = None
@@ -169,6 +194,27 @@ class Motion:
                 self._call(lambda: r.behavior.drive_straight(_mm(-80), _speed(60)), 15, "drive_straight")
         raise RuntimeError("couldn't find the cube")
 
+    def _safe_forward(self, r, mm: float):
+        """Forward in short checked hops: stops for the desk edge, marked areas and anything in the way."""
+        from . import deskmap
+        m = deskmap.get()
+        if not m.anchored(r):
+            m.anchor_from_charger(r)
+        if m.anchored(r):
+            d = deskmap.Driver(m, r, self._call, self.cancel)
+            for _ in range(int(mm // 50)):
+                if d.hop(50, speed=60) != "ok":
+                    break
+            return
+        for _ in range(int(mm // 50)):  # no map position: still never blind
+            p = r.proximity.last_sensor_reading
+            if p is None or p.is_lift_in_fov or (p.found_object and p.distance.distance_mm < 130) or r.status.is_cliff_detected:
+                break
+            self._call(lambda: r.behavior.drive_straight(_mm(50), _speed(60), should_play_anim=False), 15, "drive_straight")
+            if r.status.is_cliff_detected:
+                self._call(lambda: r.behavior.drive_straight(_mm(-50), _speed(60), should_play_anim=False), 15, "drive_straight")
+                break
+
     def _face_turn(self, r) -> bool:
         """Turn toward a face he can see (looking up and around for one). True if found."""
         self._call(lambda: r.behavior.set_head_angle(_deg(30)), 10, "set_head_angle")
@@ -191,7 +237,7 @@ class Motion:
             self.c.cube_color("blue")
             self._call(lambda: r.behavior.pickup_object(cube, num_retries=2), 60, "pickup_object")
             if self._face_turn(r):
-                self._call(lambda: r.behavior.drive_straight(_mm(150), _speed(60)), 20, "drive_straight")
+                self._safe_forward(r, 150)
             self._call(lambda: r.behavior.place_object_on_ground_here(num_retries=1), 40, "place_object_on_ground_here")
             self.c.cube_color("green", 3)
         self._say("Here's your cube, sir." if _jarvis() else "Got it!")
@@ -223,18 +269,7 @@ class Motion:
             if not self._face_turn(r):
                 self._say("I can't see you. Wave at me and try again.")
                 return
-            from . import deskmap
-            m = deskmap.get()
-            if m.anchored(r):  # checked hops: stops for edges and anything in the way
-                d = deskmap.Driver(m, r, self._call, self.cancel)
-                for _ in range(4):
-                    if d.hop(50, speed=70) != "ok":
-                        break
-            else:
-                p = r.proximity.last_sensor_reading
-                room = (p.distance.distance_mm - 70) if (p and p.found_object) else 200
-                if room > 30:
-                    self._call(lambda: r.behavior.drive_straight(_mm(min(200, room)), _speed(80)), 25, "drive_straight")
+            self._safe_forward(r, 200)
             self._call(lambda: r.behavior.set_head_angle(_deg(35)), 10, "set_head_angle")
         self._say("Here I am, sir." if _jarvis() else "Hi!")
 
@@ -283,14 +318,50 @@ class Motion:
             self._say("I couldn't get back on my charger, sir." if _jarvis() else "Help, I can't find my charger!")
 
     def dance(self):
-        from anki_vector.messaging import protocol
-        trig = self.c.find_trigger("DanceBeatGetIn", "Dance", "Celebrate") or "CelebrateSuccess"
+        """A choreographed routine: head, lift and (off the dock) small turns, on the beat. Vector's own
+        'dance' animations wait for music he can hear, which is why Dance used to hang and fail."""
+        from anki_vector.util import degrees
+        jarvis = _jarvis()
+        self._say("Initiating routine, sir." if jarvis else "Let's dance!")
+        beat = 0.42
         with self.c.control():
-            r = self.c.raw  # unwrapped: these calls get their own long time limits below
-            self._off_dock(r)
-            for t in [trig] + [x for x in self.c.triggers if "Dance" in x and x != trig][:2]:
-                self._call(lambda: r.anim.play_animation_trigger(protocol.AnimationTrigger(name=t)), 30,
-                           "play_animation_trigger")
+            r = self.c.raw
+            docked = r.status.is_on_charger
+            seq = [("head", 30), ("lift", 0.9), ("head", 0), ("lift", 0.1), ("head", 35), ("lift", 0.7),
+                   ("turn", 25), ("turn", -50), ("turn", 25), ("head", 10), ("lift", 1.0), ("head", 40),
+                   ("lift", 0.0), ("head", -5), ("lift", 0.8), ("head", 25), ("turn", -30), ("turn", 30),
+                   ("lift", 0.0), ("head", 15)]
+            for i, (kind, val) in enumerate(seq):
+                if self.cancel.is_set():
+                    break
+                if jarvis or i % 4 == 0:
+                    img = face_art.equalizer(i / len(seq) * 3, face_art.CYAN if jarvis else face_art.PINK)
+                    try:
+                        self.c.put_screen(r, img, beat * 4 + 0.5)
+                    except Exception:  # noqa: BLE001
+                        pass
+                t0 = time.time()
+                if kind == "turn":
+                    if docked:  # never spin his wheels on the charger: a head bob instead
+                        self._call(lambda: r.behavior.set_head_angle(_deg(20 if val > 0 else 5), duration=beat * 0.8),
+                                   6, "set_head_angle")
+                    else:
+                        self._call(lambda: r.behavior.turn_in_place(_deg(val), speed=degrees(200)), 6, "turn_in_place")
+                elif kind == "lift":
+                    self._call(lambda: r.behavior.set_lift_height(val, duration=beat * 0.8), 6, "set_lift_height")
+                else:
+                    self._call(lambda: r.behavior.set_head_angle(_deg(val), duration=beat * 0.8), 6, "set_head_angle")
+                time.sleep(max(0.0, beat - (time.time() - t0)))
+            if not jarvis:
+                trig = self.c.find_trigger("CelebrateSuccess", "FistBumpSuccess")
+                if trig:
+                    from anki_vector.messaging import protocol
+                    try:
+                        self._call(lambda: r.anim.play_animation_trigger(protocol.AnimationTrigger(name=trig),
+                                                                         ignore_body_track=True), 15, "play_animation_trigger")
+                    except Exception:  # noqa: BLE001
+                        pass
+        self._say("Routine complete." if jarvis else "Ta-da!")
 
     def go_to_charger(self):
         with self.c.control():

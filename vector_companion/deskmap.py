@@ -464,6 +464,13 @@ class Map:
                 return "zone"
         return None
 
+    def ahead_marked(self, x, y, th, look):
+        zc = self.zone_cells() - self.zone_cells_dock()
+        for i, j in self._ahead(x, y, th, FRONT, FRONT + look, 35):
+            if (i, j) in zc or self.floor[j * N + i] == EDGE:
+                return True
+        return False
+
     def zone_cells_dock(self):
         x0, y0, x1, y1 = DOCK_ZONE
         lo, hi = self.cell(x0, y0), self.cell(x1, y1)
@@ -560,14 +567,26 @@ class Driver:
         from anki_vector.util import distance_mm, speed_mmps
         x0, y0, th = self.pose()
         seen = self.look()
-        if seen and seen[0] and seen[1] < mm + 70:
+        if seen is None:  # the distance sensor is blocked (lift sagging into its view): never drive blind
+            try:
+                self.call(lambda: self.r.behavior.set_lift_height(1.0), 10, "set_lift_height")
+            except Exception:  # noqa: BLE001
+                pass
+            time.sleep(0.3)
+            seen = self.look()
+            if seen is None:
+                self.log("deskmap: distance sensor unusable, not moving")
+                return "blocked"
+        if seen[0] and seen[1] < mm + 70:
+            return "blocked"
+        if self.m.ahead_marked(x0, y0, th, mm + 50):  # a keep-out area you marked, or a known edge
             return "blocked"
         if self.r.status.is_cliff_detected:
             self.m.mark_edge(x0, y0, th)
             return "edge"
         try:
             self.call(lambda: self.r.behavior.drive_straight(distance_mm(mm), speed_mmps(speed), should_play_anim=False),
-                      8 + 2 * mm / speed, "drive_straight")
+                      15 + 2 * mm / speed, "drive_straight")
         except Exception as e:  # noqa: BLE001  (he stops himself at an edge: the move reports a failure)
             self.log(f"deskmap: hop stopped ({e.__class__.__name__})")
         x1, y1, _ = self.pose()

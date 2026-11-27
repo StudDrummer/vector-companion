@@ -334,10 +334,13 @@ class Companion:
         finally:
             self.mirror_on = False
 
-    def pause_still(self, seconds: float) -> None:
-        """Release the hold so a built-in behavior can run; it comes back by itself afterwards."""
+    def pause_still(self, seconds: float, keep_control: bool = False) -> None:
+        """Release the hold so a built-in behavior can run; it comes back by itself afterwards.
+        keep_control: for our own motions, which take control straight away anyway (letting go here gave
+        his own personality a moment to show, even in Jarvis mode)."""
         self.still_paused_until = max(self.still_paused_until, time.time() + max(5.0, min(float(seconds), 900)))
-        self.release_now()  # his own behavior (learning a face, a game) needs his body too
+        if not keep_control:
+            self.release_now()  # his own behavior (learning a face) needs his body too
         if self.reserve is not None:
             rc, self.reserve = self.reserve, None
             try:
@@ -440,6 +443,19 @@ class Companion:
             r.conn._cancel_active()
         except Exception:  # noqa: BLE001
             pass
+        m = getattr(getattr(self, "actions", None), "motion", None)
+        try:
+            off_dock = not r.status.is_on_charger
+        except Exception:  # noqa: BLE001
+            off_dock = True
+        if off_dock or jarvis_mode() or (m and m.busy):
+            # handing control back here is what let him wander off mid-task: keep it, just cancel
+            try:
+                r.motors.set_wheel_motors(0, 0)
+            except Exception:  # noqa: BLE001
+                pass
+            log("cancelled a stuck action (kept control)")
+            return
         try:
             self.call(lambda: r.conn.release_control(timeout=4), 6, "release_control")
         except Exception:  # noqa: BLE001
@@ -1049,12 +1065,15 @@ class Companion:
             log(f"desk map: couldn't add the boxes to his planner ({e.__class__.__name__})")
 
     def _watch_loop(self):
-        """Dock lock: if he leaves the charger by himself, send him straight back."""
+        """He never wanders the desk on his own (that's how he pushed a frame and fell off): if he's off
+        the charger and nobody asked him to be (no task running, nobody driving him for a minute), he's
+        sent back. Dock lock: straight away. 'Free roam' in Drive & Camera turns this off."""
         off_since = None
         while True:
             time.sleep(0.5)
             r = self._robot
-            if r is None or not safety()["dock_lock"] or self.returning:
+            sf = safety()
+            if r is None or self.returning or (sf.get("free_roam") and not sf["dock_lock"]):
                 off_since = None
                 continue
             try:
@@ -1064,17 +1083,23 @@ class Companion:
                     continue
             except Exception:  # noqa: BLE001
                 continue
-            off_since = off_since or time.time()
-            if time.time() - off_since > 1.0:
+            m = getattr(getattr(self, "actions", None), "motion", None)
+            now = time.time()
+            if (m and m.busy) or now - self.drive_cmd.get("at", 0) < 60:
+                off_since = None
+                continue
+            off_since = off_since or now
+            wait = 1.0 if sf["dock_lock"] else (60.0 if now - getattr(self, "motion_ended", 0) < 70 else 3.0)
+            if now - off_since > wait:
                 threading.Thread(target=self._return_home, daemon=True).start()
                 off_since = None
 
     def _return_home(self):
         self.returning = True
         try:
-            log("dock lock: he left the charger, sending him back")
+            log("he's off the charger with nothing to do: sending him back")
             with self.control(wait=5) as r:
-                r.behavior.drive_on_charger()
+                self.call(lambda: r.behavior.drive_on_charger(), 60, "drive_on_charger")
         except Exception as e:  # noqa: BLE001
             log(f"dock lock: couldn't drive back ({e})")
         finally:

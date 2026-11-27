@@ -91,12 +91,13 @@ _speak = speak
 # Vector's own voice commands (the same things "Hey Vector" does), matched on clean text and carried out
 # by the companion (remote commands for these are ignored by a regular Vector). (pattern, action)
 VECTOR_COMMANDS = [
-    (r"\bblack ?jack\b|play (a )?(card )?game|play cards|deal me in", "blackjack"),
+    (r"\bblack ?jack\b|play (a )?(card )?game|play cards|deal me in|^(let'?s )?play again$|^deal( again| me)?$|"
+     r"^(another|new|one more) (hand|round|game)$", "blackjack"),
     (r"^(hit|hit me|another( card)?|one more( card)?)$", "bj_hit"),
     (r"^(stand|i'?ll stand|stay|i'?m good|hold)$", "bj_stand"),
     (r"^(stop|freeze|halt)( it| there| right there| now)?$|\bstop (moving|driving|roaming|exploring|scanning|wandering)\b", "stop_moving"),
     (r"^(stop|quit|end|i'?m done|no more)( the| this)?( game| playing| blackjack)?$|stop playing|quit the game", "bj_quit"),
-    (r"what'?s my (card|cards|hand|score|total)|what (do|did) i (have|get)|what are my cards", "bj_status"),
+    (r"what'?s my (card|cards|hand|score|total)|what is my (card|cards|hand|score|total)|what (do|did) i (have|get)|what are my cards", "bj_status"),
     (r"\bfist ?bump", "fist_bump"),
     (r"\bdo a trick\b|something cool|show me a trick", "trick"),
     (r"\bi love you\b", "love"),
@@ -264,6 +265,19 @@ def respond_stream(text: str, history: list[dict] | None = None):
                "your notes and GitHub." if brain._style() == "jarvis" else
                "I can't see that. I can check Canvas, your calendar, your notes and GitHub.")
         return
+    from . import websearch
+    if websearch.wants(text):  # hours, prices, scores, news: look it up, never guess
+        t0 = time.time()
+        got = False
+        try:
+            for part in websearch.answer(text, history):
+                got = True
+                yield part
+        except Exception as e:  # noqa: BLE001
+            S.log("voice", f"web answer failed: {e}")
+        S.log("voice", f"web answer in {time.time() - t0:.1f}s")
+        if got:
+            return
     from . import openjarvis as OJ
     if OJ.wants_deep(text):
         done = yield from _deep(text, history, brain, OJ)

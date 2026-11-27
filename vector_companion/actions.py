@@ -57,6 +57,8 @@ class Actions:
 
     def anim(self, key: str) -> str | None:
         from .companion import play_trigger  # noqa: F811
+        if _jarvis():  # Jarvis mode: none of Vector's character animations (eyes, sounds), a HUD gesture instead
+            return self.gesture(key)
         trig = self.c.find_trigger(*ANIMS.get(key, (key,)))
         if trig:
             t0 = time.time()
@@ -68,6 +70,32 @@ class Actions:
                     self.c.note_stuck(trig)
                 raise
         return trig
+
+    GESTURES = {"fist_bump": [("lift", 0.95), ("lift", 0.15)], "hello": [("head", 35), ("head", 12)],
+                "praise": [("head", 28), ("head", 14)], "love": [("head", 32), ("head", 14)],
+                "scold": [("head", -5), ("head", 10)], "goodbye": [("head", 25), ("head", 5)],
+                "trick": [("lift", 1.0), ("head", 40), ("lift", 0.0), ("head", 10)], "think": [("head", 25)],
+                "sleep": [("head", -20), ("lift", 0.0)], "win": [], "lose": [], "push": []}
+
+    def gesture(self, key: str) -> str:
+        """A precise, mechanical move plus a HUD card: how Jarvis 'reacts' without Vector's personality."""
+        from anki_vector.util import degrees
+        if key in ("win", "lose", "push"):
+            return f"jarvis:{key}"  # the cards and the banner already say it
+        moves = self.GESTURES.get(key, [("head", 20), ("head", 10)])
+        with self.c.control() as r:
+            if key == "sleep":
+                self.c.put_screen(r, face_art.moon(), 6)
+            for i, (kind, val) in enumerate(moves):
+                if key != "sleep":
+                    self.c.put_screen(r, face_art.gesture(key, i / max(1, len(moves))), 2.5)
+                if kind == "lift":
+                    self.c.call(lambda v=val: r.behavior.set_lift_height(v, duration=0.25), 6, "set_lift_height")
+                else:
+                    self.c.call(lambda v=val: r.behavior.set_head_angle(degrees(v), duration=0.3), 6, "set_head_angle")
+            if key != "sleep":
+                self.c.put_screen(r, face_art.gesture(key, 0.85), 2.5)
+        return f"jarvis:{key}"
 
     def say(self, text: str):
         self.c.say(text)
@@ -100,6 +128,8 @@ class Actions:
                 return {"playing": False}
             threading.Thread(target=self.bj.hit if a == "bj_hit" else self.bj.stand, daemon=True).start()
             return {"playing": True}
+        if a == "trick" and _jarvis():
+            return {"played": self.gesture("trick")}
         if a == "trick":
             pool = [t for t in TRICKS if t in self.c.triggers] or [t for t in self.c.triggers if "Feedback" in t]
             trig = random.choice(pool)
@@ -271,7 +301,6 @@ class Blackjack:
             self.you = [self.deck.pop(), self.deck.pop()]
             self.me = [self.deck.pop(), self.deck.pop()]
             self.active = True
-            self.c.pause_still(600)  # keep him free for the game
             if self.c.cube_connected:
                 self.c.cube_color("blue")
             y = value(self.you)
@@ -333,7 +362,7 @@ class Blackjack:
         self.result = {"win": "Vector wins", "lose": "You win", "push": "Push"}.get(outcome, outcome)
         if self.c.cube_connected:
             self.c.cube_color({"win": "red", "lose": "green"}.get(outcome, "yellow"), 5)
-        banner, color = {"win": ("VECTOR WINS", RED), "lose": ("YOU WIN!", GREEN)}.get(outcome, ("PUSH", GOLD))
+        banner, color = {"win": ("JARVIS WINS" if _jarvis() else "VECTOR WINS", RED), "lose": ("YOU WIN!", GREEN)}.get(outcome, ("PUSH", GOLD))
         self.present(text, reveal=True, linger=3.5, banner=banner, color=color)
         try:
             self.a.anim(outcome)

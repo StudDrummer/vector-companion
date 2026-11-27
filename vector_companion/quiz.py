@@ -91,7 +91,6 @@ class Quiz:
             self.c.say(f"Sorry, I couldn't make questions about {self.topic}. Try a different topic.")
             return
         self.active = True
-        self.c.pause_still(900)
         self.ask(intro=f"{len(self.qs)} questions. Say skip if you don't know. ")
 
     def ask(self, intro: str = ""):

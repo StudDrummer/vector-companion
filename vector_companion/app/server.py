@@ -512,6 +512,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json({"url": "/api/cam?x=1"})
             if path == "/api/cam":
                 return self._proxy_cam()
+            if path == "/api/snapshot":  # one frame from his camera, through the companion
+                return self._send(200, cc.call("/capture", timeout=12), "image/jpeg")
             if path == "/api/settings":
                 return self._json({"app": S.load(), "brain": brain_settings(),
                                    "ollama_models": ollama_models(),

@@ -93,15 +93,21 @@ class Motion:
         k = 0
         time.sleep(0.5)
         while self.busy == action:
-            if _jarvis() and time.time() >= self.c.speaking_until and action != "dance":
+            slow_link = getattr(self, "_hud_slow_until", 0) > time.time()
+            if _jarvis() and time.time() >= self.c.speaking_until and action != "dance" and not slow_link \
+                    and (k == 0 or action not in ("desk_scan", "roam", "fetch_cube", "explore", "come_here")
+                         or k % 4 == 0):
                 p = deskmap.get().progress
                 sub = (p or {}).get("step") or self.step or "in progress"
                 img = face_art.hud_action(HUD_TITLES.get(action, action.replace("_", " ")), sub, phase=(k % 8) / 8)
                 r = self.c.raw
+                t0 = time.time()
                 try:
-                    self.c.call(lambda: self.c.put_screen(r, img, 3), 5, "hud")
+                    self.c.call(lambda: self.c.put_screen(r, img, 20), 5, "hud")
                 except Exception:  # noqa: BLE001
                     pass
+                if time.time() - t0 > 2:  # the link is struggling: the driving commands matter more
+                    self._hud_slow_until = time.time() + 60
             k += 1
             time.sleep(4.0)  # each frame is ~35 KB over his Wi-Fi: don't crowd out the driving commands
 
@@ -141,7 +147,8 @@ class Motion:
         if "charger" in m or "map" in m or "where i am" in m:
             return msg
         if "slow" in m or "time" in m:
-            return "That took too long, so I stopped."
+            return ("My connection dropped out partway through that, sir. Try again in a moment."
+                    if _jarvis() else "My Wi-Fi hiccuped. Try again in a moment!")
         return f"I couldn't {action.replace('_', ' ')} just now."
 
     # ------------------------------------------------------------ helpers
@@ -151,8 +158,33 @@ class Motion:
         except Exception:  # noqa: BLE001
             pass
 
-    def _call(self, fn, timeout: float, name: str):
-        return self.c.call(fn, timeout, name)
+    def _call(self, fn, timeout: float, name: str, done=None):
+        """One robot command. If the reply is slow (his Wi-Fi) but it visibly happened, carry on instead of
+        failing the whole task."""
+        try:
+            return self.c.call(fn, timeout, name)
+        except Exception:
+            r = self.c.raw
+            checks = {
+                "drive_off_charger": lambda: not r.status.is_on_charger,
+                "drive_on_charger": lambda: r.status.is_on_charger,
+                "pickup_object": lambda: r.status.is_carrying_block,
+                "place_object_on_ground_here": lambda: not r.status.is_carrying_block,
+                "set_lift_height": lambda: bool(r.status.is_lift_in_pos),
+                "set_head_angle": lambda: True,
+            }
+            check = done or checks.get(name)
+            if check is None:
+                raise
+            t0 = time.time()
+            while time.time() - t0 < max(5.0, timeout / 2):
+                try:
+                    if check():
+                        return None
+                except Exception:  # noqa: BLE001
+                    pass
+                time.sleep(0.25)
+            raise
 
     def _off_dock(self, r):
         try:

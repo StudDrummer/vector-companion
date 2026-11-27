@@ -66,7 +66,7 @@ MIC_OFF = re.compile(r"\b(stop listening|mic off|turn off (the |your )?(mic|micr
 GAME_WORDS = re.compile(r"\b(hit|hit me|another( card)?|one more|card|stand|stay|i'?m good|hold|fold|what('?s| is) my "
                         r"(hand|score|total|cards?)|what do i have|quit|stop( playing)?|end( the)? game|i'?m done|deal|again|"
                         r"play again|new game|another (game|round))\b", re.I)
-FILLER = re.compile(r"\W*(mm+-?hmm+|uh+-?huh|hmm+|uh+|um+|ok(ay)?|yeah|yep|yes|no|nope|sure|right|cool|nice|"
+FILLER = re.compile(r"\W*(mm+-?hmm+|mm+-?mm+|m-?hm+|uh+-?(huh|uh)|hmm+|uh+|um+|ok(ay)?|yeah|yep|yes|no|nope|sure|right|cool|nice|"
                     r"thanks?( you)?( very much)?|got it|alright|all right)\W*", re.I)
 STOP_WORDS = re.compile(r"^(never ?mind|stop|cancel|nothing|that'?s all|thanks?,? (that'?s all|jarvis)|thank you,? jarvis)\W*$", re.I)
 
@@ -253,6 +253,14 @@ class Ears:
         import numpy as np
         return float(np.sqrt(np.mean(f.astype(np.float32) ** 2)) + 1e-6)
 
+    def level(self, frames) -> float:
+        """How loud the talking part of a recording was (median of the loud frames)."""
+        if not frames:
+            return 0.0
+        vals = sorted(self.rms(f) for f in frames)
+        top = vals[len(vals) // 2:] or vals
+        return top[len(top) // 2]
+
     def record(self, wait_for_speech: float, first=None, force: bool = False) -> "list | None":
         """Collect frames until ~0.8 s of quiet after speech. None if nobody spoke within wait_for_speech."""
         frames = list(first or [])
@@ -434,6 +442,7 @@ class Ears:
                 else:
                     print("   reply:", part)
         reply = " ".join(p for p in parts if p).strip()
+        self.last_reply = reply
         self.handed_off = not reply  # an action/game/quiz will talk by itself in a moment
         self.history += [{"role": "user", "content": text}, {"role": "assistant", "content": reply or "(done)"}]
         self.history_at = time.time()
@@ -584,6 +593,7 @@ class Ears:
                 command = ""
             self.set(wake_score=round(score, 2), heard=self.state["heard"] + 1, state="hearing you")
             log(f"name check {check:.2f}s, full text {time.time() - t0 - check:.2f}s: {text!r}")
+            self.cmd_level = self.level(frames)
             if command:
                 self.conversation(None, first=True, text=command)
             else:  # just "Jarvis": the chime and his listening face say he's ready; you go straight on
@@ -594,6 +604,9 @@ class Ears:
     def game_turn(self, frames) -> bool:
         """In blackjack or a quiz you don't need to say 'Jarvis' first: 'hit', 'stand', or a quiz answer
         goes straight in."""
+        ref = getattr(self, "cmd_level", 0.0)
+        if ref and self.level(frames) < 0.45 * ref:
+            return False  # quieter than you: someone else in the room
         text = self.transcribe(frames)
         if not text:
             return False
@@ -659,6 +672,11 @@ class Ears:
             turns += 1
             if not self.prefs()["ears"].get("follow_up", True):
                 break
+            # Open-mic follow-ups answered background talk ("Ebola cold cream", "Mm-mm" -> a timer). Now he
+            # only keeps listening if he asked you something, an action is about to talk, or a game/quiz is on.
+            asked_q = (getattr(self, "last_reply", "") or "").rstrip().endswith("?")
+            if not (asked_q or self.game or self.handed_off):
+                break
             # follow-up without the wake word. Actions (dealing cards, the next quiz question) start talking a few
             # seconds later, so wait for him to start, then to finish, then listen.
             asked = time.time()
@@ -667,6 +685,10 @@ class Ears:
             self.set(state="listening for a follow-up")
             window = 30.0 if self.game else 6.0  # in a quiz or a game you get longer to answer
             frames, text = self.record(wait_for_speech=window), None
+            ref = getattr(self, "cmd_level", 0.0)
+            if frames and ref and self.level(frames) < 0.45 * ref and not self.game:
+                log("follow-up: quieter voice than yours (someone else / TV), ignored")
+                break
             log("follow-up: " + ("heard something" if frames else f"nothing in {window:.0f}s, back to 'Hey Jarvis'"))
 
 

@@ -591,6 +591,100 @@ class Driver:
         self.m.mark_prox(x, y, th, found, dist if found else PROX_MAX)
         return found, (dist if found else PROX_MAX)
 
+    def act(self, fn, timeout: float, name: str, done=None) -> bool:
+        """Run one command; if its reply is slow (his Wi-Fi), check whether it actually happened instead of
+        giving up ('that took too long' while his arms were already up)."""
+        try:
+            self.call(fn, timeout, name)
+            return True
+        except Exception as e:  # noqa: BLE001
+            if done is None:
+                raise
+            t0 = time.time()
+            while time.time() - t0 < timeout:
+                try:
+                    if done():
+                        self.log(f"deskmap: {name} replied late but it happened")
+                        return True
+                except Exception:  # noqa: BLE001
+                    pass
+                time.sleep(0.2)
+            self.log(f"deskmap: {name} didn't happen ({e.__class__.__name__})")
+            return False
+
+    def lift(self, h: float) -> bool:
+        target = 32 + 60 * h  # mm, roughly: 0 = down, 1 = fully up
+        return self.act(lambda: self.r.behavior.set_lift_height(h), 8, "set_lift_height",
+                        lambda: abs(self.r.lift_height_mm - target) < 10)
+
+    def stop(self):
+        for _ in range(2):
+            try:
+                self.call(lambda: self.r.motors.set_wheel_motors(0, 0), 3, "set_wheel_motors")
+                return
+            except Exception:  # noqa: BLE001
+                time.sleep(0.2)
+
+    def leg(self, mm: float, speed: float) -> str:
+        """Drive forward continuously, watching the sensors at 20 Hz on this side, the way a robot vacuum
+        does (one start + one stop command instead of a round trip per few centimetres). Ends: ok / edge /
+        blocked / stuck / reflex."""
+        r = self.r
+        x0, y0, _ = self.pose()
+        try:
+            self.call(lambda: r.motors.set_wheel_motors(speed, speed), 4, "set_wheel_motors")
+        except Exception:  # noqa: BLE001
+            self.stop()
+            return "stuck"
+        t0 = last_move = time.time()
+        lastp, out = (x0, y0), "ok"
+        try:
+            while True:
+                time.sleep(0.05)
+                if self.cancel.is_set():
+                    out = "cancel"
+                    break
+                st = r.status
+                if st.is_picked_up or getattr(st, "is_being_held", False):
+                    out = "lifted"
+                    break
+                if st.is_cliff_detected:
+                    out = "edge"
+                    break
+                if self.control_ok is not None and not self.control_ok():
+                    out = "reflex"
+                    break
+                try:
+                    p = r.proximity.last_sensor_reading
+                    if p is not None and not p.is_lift_in_fov and p.found_object and p.distance.distance_mm < 95:
+                        out = "blocked"
+                        break
+                except Exception:  # noqa: BLE001
+                    pass
+                w = self.m.where(r)
+                if w is None:
+                    out = "lifted"
+                    break
+                x, y = w[0], w[1]
+                if math.hypot(x - x0, y - y0) >= mm - 4:
+                    break
+                now = time.time()
+                if math.hypot(x - lastp[0], y - lastp[1]) > 3:
+                    lastp, last_move = (x, y), now
+                elif now - last_move > 1.2 and now - t0 > 1.2:
+                    out = "stuck"
+                    break
+                if now - t0 > 2 + 2.5 * mm / speed:
+                    out = "stuck"
+                    break
+        finally:
+            self.stop()
+        if out == "cancel":
+            raise InterruptedError("stopped")
+        if out == "lifted":
+            raise Lost("picked up")
+        return out
+
     def reflex(self) -> bool:
         """Did one of his own reactions just take control? If so, let it finish and take control back."""
         if self.control_ok is None or self.control_ok():
@@ -604,8 +698,8 @@ class Driver:
             self.log(f"deskmap: couldn't take control back ({e.__class__.__name__})")
         return True
 
-    def room_around(self, rad=62) -> bool:
-        """Is there room to turn in place? (His corners sweep about 6 cm out.)"""
+    def room_around(self, rad=56) -> bool:
+        """Is there room to turn in place? (His corners sweep about 5 cm out.)"""
         x, y, _ = self.pose()
         with self.m.lock:
             for dx in range(-rad, rad + 1, CELL // 2):
@@ -627,12 +721,18 @@ class Driver:
         d = wrap(heading - th)
         if abs(d) > math.radians(4):
             if abs(d) > math.radians(35) and not self.room_around():
-                self.back(30)
+                self.back(50)
                 if not self.room_around():
                     self.log("deskmap: too cramped to turn here")
                     return False
-            self.call(lambda: self.r.behavior.turn_in_place(degrees(math.degrees(d)), speed=degrees(70)), 15, "turn_in_place")
+            def turned():
+                w = self.m.where(self.r)
+                return w is not None and abs(wrap(heading - w[2])) < math.radians(8)
+            self.act(lambda: self.r.behavior.turn_in_place(degrees(math.degrees(d)), speed=degrees(70)), 12,
+                     "turn_in_place", turned)
             if self.reflex():
+                return False
+            if not turned():
                 return False
         time.sleep(0.3)  # fresh distance readings for the new direction
         return True
@@ -643,10 +743,7 @@ class Driver:
         x0, y0, th = self.pose()
         seen = self.look(samples=3)
         if seen is None:  # the distance sensor is blocked (lift sagging into its view): never drive blind
-            try:
-                self.call(lambda: self.r.behavior.set_lift_height(1.0), 10, "set_lift_height")
-            except Exception:  # noqa: BLE001
-                pass
+            self.lift(1.0)
             time.sleep(0.3)
             seen = self.look(samples=3)
             if seen is None:
@@ -659,22 +756,22 @@ class Driver:
         if self.r.status.is_cliff_detected:
             self.m.mark_edge(x0, y0, th)
             return "edge"
-        try:
-            self.call(lambda: self.r.behavior.drive_straight(distance_mm(mm), speed_mmps(speed), should_play_anim=False),
-                      15 + 2 * mm / speed, "drive_straight")
-        except Exception as e:  # noqa: BLE001  (he stops himself at an edge: the move reports a failure)
-            self.log(f"deskmap: hop stopped ({e.__class__.__name__})")
+        res = self.leg(mm, speed)
         x1, y1, _ = self.pose()
         self.reach = (x1, y1)
         self.m.mark_path(x0, y0, x1, y1)
-        if self.reflex():  # his edge/bump reaction already backed him off: don't add our own reverse
+        if res == "reflex" or self.reflex():  # his edge/bump reaction already backed him off: no reverse of ours
+            self.reflex()
             self.m.mark_edge(x1, y1, th)
             return "edge"
-        if self.r.status.is_cliff_detected:
+        if res == "edge" or self.r.status.is_cliff_detected:
             self.m.mark_edge(x1, y1, th)
             self.back(40)
             return "edge"
-        if math.hypot(x1 - x0, y1 - y0) < 0.35 * mm:
+        if res == "blocked":
+            self.look()
+            return "blocked"
+        if res == "stuck" or math.hypot(x1 - x0, y1 - y0) < 0.35 * mm:
             # pushing and not moving, with nothing in front for the sensor: a low lip (the mat's edge, a cable)
             if not (seen[0] and seen[1] < 200) and self.climb():
                 return "ok"
@@ -691,10 +788,9 @@ class Driver:
         for attempt in (1, 2):
             x0, y0, _ = self.pose()
             try:
-                self.call(lambda: r.behavior.set_lift_height(1.0), 8, "set_lift_height")
+                self.lift(1.0)
                 if attempt == 1:
-                    self.call(lambda: r.behavior.drive_straight(distance_mm(50), speed_mmps(70), should_play_anim=False),
-                              12, "drive_straight")
+                    self.leg(50, 75)
                 else:  # arms down against the desk: tilts his front up onto the lip while the treads push
                     self.back(15)
                     self.call(lambda: r.motors.set_lift_motor(-4), 3, "set_lift_motor")
@@ -702,7 +798,9 @@ class Driver:
                     time.sleep(1.2)
                     self.call(lambda: r.motors.set_wheel_motors(0, 0), 3, "set_wheel_motors")
                     self.call(lambda: r.motors.set_lift_motor(0), 3, "set_lift_motor")
-                    self.call(lambda: r.behavior.set_lift_height(1.0), 8, "set_lift_height")
+                    self.lift(1.0)
+            except (Lost, InterruptedError):
+                raise
             except Exception as e:  # noqa: BLE001
                 self.log(f"deskmap: climb attempt {attempt} interrupted ({e.__class__.__name__})")
             if self.reflex() or self.r.status.is_cliff_detected:
@@ -772,24 +870,34 @@ def _bearings(m: Map, centre, step_deg=22.5, dock_avoid=40):
 def fan(m: Map, d: Driver, centre, bearings, deadline, max_ray=1500):
     """Drive out along each bearing until something stops him, come back, fill between the lines."""
     rays = []
+    fails = 0
     for b in sorted(bearings, key=lambda b: wrap(b)):
-        if time.time() > deadline:
+        if time.time() > deadline or fails >= 3:
             break
-        if not d.turn_to(b):
-            continue
-        start = d.pose()[:2]
-        d.reach, why = start, "max"
-        while math.hypot(d.reach[0] - start[0], d.reach[1] - start[1]) < max_ray:
-            seen = d.look()
-            far = not seen or not seen[0] or seen[1] > 250
-            why = d.hop(70 if far else 40, speed=50 if far else 35)
-            if why != "ok":
-                break
-        reach = d.reach
-        rays.append((wrap(b), reach, why))
-        x, y, _ = d.pose()
-        if math.hypot(x - start[0], y - start[1]) > 25:
-            d.follow([start])  # turn round and drive back forward, sensor first (no long blind reverse)
+        try:
+            if not d.turn_to(b):
+                continue
+            start = d.pose()[:2]
+            d.reach, why = start, "max"
+            while math.hypot(d.reach[0] - start[0], d.reach[1] - start[1]) < max_ray:
+                seen = d.look()
+                far = not seen or not seen[0] or seen[1] > 250
+                why = d.hop(70 if far else 40, speed=50 if far else 35)
+                if why != "ok":
+                    break
+            reach = d.reach
+            rays.append((wrap(b), reach, why))
+            x, y, _ = d.pose()
+            if math.hypot(x - start[0], y - start[1]) > 25:
+                d.follow([start])  # turn round and drive back forward, sensor first (no long blind reverse)
+            fails = 0
+        except (Lost, InterruptedError):
+            raise
+        except Exception as e:  # noqa: BLE001  (a slow reply on his Wi-Fi: skip this line, don't end the scan)
+            fails += 1
+            d.log(f"deskmap: a line was cut short ({e.__class__.__name__}); carrying on")
+            d.stop()
+            time.sleep(1.0)
     rays.sort(key=lambda t: t[0])
     for (b1, p1, w1), (b2, p2, w2) in zip(rays, rays[1:] + rays[:1]):
         gap = wrap(b2 - b1) % (2 * math.pi)
@@ -841,10 +949,8 @@ def go_home(m: Map, d: Driver, r, call, log=print) -> bool:
         log(f"deskmap: couldn't line up with the dock ({e})")
     before = m.where(r)
     prep_dock(r, call, log)
-    try:
-        call(lambda: r.behavior.drive_on_charger(), 120, "drive_on_charger")
-    except Exception as e:  # noqa: BLE001
-        log(f"deskmap: docking failed ({e})")
+    if not d.act(lambda: r.behavior.drive_on_charger(), 120, "drive_on_charger", lambda: r.status.is_on_charger):
+        log("deskmap: docking failed")
     time.sleep(1.0)
     if r.status.is_on_charger:
         now = m.where(r)
@@ -873,9 +979,10 @@ def scan(m: Map, r, call, cancel, say=print, log=print, minutes: float = 10, con
     d = Driver(m, r, call, cancel, log, *control)
     m.progress = {"what": "scanning", "step": "leaving the dock", "started": time.time()}
     # lift fully up: it clears the mat's edge and stays out of the distance sensor's view
-    call(lambda: r.behavior.set_lift_height(1.0), 10, "set_lift_height")
-    call(lambda: r.behavior.set_head_angle(degrees(-5)), 10, "set_head_angle")
-    call(lambda: r.behavior.drive_off_charger(), 30, "drive_off_charger")
+    d.lift(1.0)
+    d.act(lambda: r.behavior.set_head_angle(degrees(-5)), 8, "set_head_angle", lambda: True)
+    if not d.act(lambda: r.behavior.drive_off_charger(), 30, "drive_off_charger", lambda: not r.status.is_on_charger):
+        raise RuntimeError("couldn't get off the charger")
     x, y, _ = d.pose()
     m.mark_path(0, 0, x, y)
     centres = [(x, y)]
@@ -899,7 +1006,14 @@ def scan(m: Map, r, call, cancel, say=print, log=print, minutes: float = 10, con
         spot = m.centre(*best)
         way = m.plan(cur, spot, clear=80)
         m.progress["step"] = f"spot {len(centres) + 1}"
-        if not way or not d.follow(way):
+        try:
+            if not way or not d.follow(way):
+                continue
+        except (Lost, InterruptedError):
+            raise
+        except Exception as e:  # noqa: BLE001
+            d.log(f"deskmap: moving to the next spot was cut short ({e.__class__.__name__})")
+            d.stop()
             continue
         here = d.pose()[:2]
         centres.append(here)
@@ -928,10 +1042,11 @@ def roam(m: Map, r, call, cancel, log=print, minutes: float = 3, pause=None, con
     d = Driver(m, r, call, cancel, log, *control)
     deadline = time.time() + minutes * 60
     m.progress = {"what": "roaming", "step": "leaving the dock", "started": time.time()}
-    call(lambda: r.behavior.set_lift_height(1.0), 10, "set_lift_height")
-    call(lambda: r.behavior.set_head_angle(degrees(5)), 10, "set_head_angle")
+    d.lift(1.0)
+    d.act(lambda: r.behavior.set_head_angle(degrees(5)), 8, "set_head_angle", lambda: True)
     if r.status.is_on_charger:
-        call(lambda: r.behavior.drive_off_charger(), 30, "drive_off_charger")
+        if not d.act(lambda: r.behavior.drive_off_charger(), 30, "drive_off_charger", lambda: not r.status.is_on_charger):
+            raise RuntimeError("couldn't get off the charger")
         x, y, _ = d.pose()
         m.mark_path(0, 0, x, y)
     visits, fails = 0, 0
@@ -944,7 +1059,15 @@ def roam(m: Map, r, call, cancel, log=print, minutes: float = 3, pause=None, con
                 fails += 1
                 continue
             m.progress["step"] = f"spot {visits + 1}"
-            if d.follow(way):
+            try:
+                ok = d.follow(way)
+            except (Lost, InterruptedError):
+                raise
+            except Exception as e:  # noqa: BLE001
+                d.log(f"deskmap: a move was cut short ({e.__class__.__name__})")
+                d.stop()
+                ok = False
+            if ok:
                 visits += 1
                 fails = 0
                 if pause:

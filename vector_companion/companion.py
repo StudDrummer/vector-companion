@@ -511,6 +511,17 @@ class Companion:
             try:
                 if not (jarvis_mode() and self.connected) or self.mirror_on:
                     continue
+                # Jarvis mode holds his body at normal priority all the time (above 'Hey Vector' and his
+                # idle personality). Anything that took it (a reflex, a reconnect) gets it taken back.
+                mo = getattr(self.actions, "motion", None)
+                if not self.has_control() and not (mo and mo.busy):
+                    try:
+                        with self.control(wait=2):
+                            pass
+                        log("Jarvis mode: took control back")
+                        last = 0.0  # and put the Jarvis face back right away
+                    except Exception:  # noqa: BLE001
+                        pass
                 if time.time() < getattr(self, "screen_until", 0) or time.time() < self.speaking_until:
                     last = 0.0
                     continue
